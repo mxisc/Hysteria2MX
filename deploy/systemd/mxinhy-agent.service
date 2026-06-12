@@ -1,0 +1,16 @@
+[Unit]
+Description=mxinhy node agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'exec {{AGENT_INSTALL_PATH}} -config {{AGENT_CONFIG_PATH}} >>/var/log/mxinhy-agent/agent.log 2>&1'
+Restart=always
+RestartSec=2
+User=root
+WorkingDirectory=/
+LogsDirectory=mxinhy-agent
+
+[Install]
+WantedBy=multi-user.target
