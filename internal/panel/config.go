@@ -288,6 +288,18 @@ func resolveProjectRoot(configPath string) string {
 	configPath = strings.TrimSpace(configPath)
 	if configPath != "" {
 		resolvedConfigPath := resolveConfigPath(configPath)
+		if isReleaseSharedConfigPath(resolvedConfigPath) {
+			if releaseRoot, ok := runtimeReleaseRootFromExecutable(); ok {
+				return releaseRoot
+			}
+			sharedDir := filepath.Dir(filepath.Dir(resolvedConfigPath))
+			deployRoot := filepath.Dir(sharedDir)
+			currentLink := filepath.Join(deployRoot, "current")
+			if resolvedCurrent, err := filepath.EvalSymlinks(currentLink); err == nil && resolvedCurrent != "" {
+				return filepath.Clean(resolvedCurrent)
+			}
+			return deployRoot
+		}
 		configDir := filepath.Dir(resolvedConfigPath)
 		return filepath.Clean(filepath.Join(configDir, ".."))
 	}
@@ -311,6 +323,36 @@ func runtimeRootFromExecutable() string {
 		return workdir
 	}
 	return "."
+}
+
+func runtimeReleaseRootFromExecutable() (string, bool) {
+	execPath, err := os.Executable()
+	if err != nil {
+		return "", false
+	}
+	if resolvedPath, resolveErr := filepath.EvalSymlinks(execPath); resolveErr == nil {
+		execPath = resolvedPath
+	}
+	execDir := filepath.Dir(execPath)
+	parentDir := filepath.Dir(execDir)
+	if filepath.Base(execDir) != "panel" || filepath.Base(parentDir) != "build" {
+		return "", false
+	}
+	releaseRoot := filepath.Clean(filepath.Join(parentDir, ".."))
+	if filepath.Base(filepath.Dir(releaseRoot)) != "releases" {
+		return "", false
+	}
+	return releaseRoot, true
+}
+
+func isReleaseSharedConfigPath(path string) bool {
+	cleaned := filepath.Clean(strings.TrimSpace(path))
+	if cleaned == "." || cleaned == "" {
+		return false
+	}
+	return filepath.Base(cleaned) == "panel.env" &&
+		filepath.Base(filepath.Dir(cleaned)) == "config" &&
+		filepath.Base(filepath.Dir(filepath.Dir(cleaned))) == "shared"
 }
 
 func loadEnvFile(configPath string) (map[string]string, error) {
