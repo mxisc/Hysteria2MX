@@ -1,0 +1,36 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+build/
+dist
+dist-ssr
+*.local
+config/app.php
+config/panel.env
+storage/jobs/*
+storage/locks/*
+storage/security/login_attempts.json
+!storage/jobs/.gitkeep
+!storage/locks/.gitkeep
+.debug-tools
+release/
+debug-*.md
+Trash/
+mxinhy-panel
+
+# Editor directories and files
+.vscode/
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
