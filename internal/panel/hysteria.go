@@ -64,6 +64,7 @@ type nodeRecord struct {
 
 type userRecord struct {
 	ID             int64
+	PublicID       string
 	NodeID         int64
 	Username       string
 	AuthPassword   string
@@ -397,7 +398,7 @@ func (s *hysteriaService) listUsersPageForUser(ctx context.Context, user *authUs
 
 	args = append(args, pageSize, offset)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
 		FROM hysteria_users `+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
@@ -443,9 +444,9 @@ func (s *hysteriaService) createUser(ctx context.Context, payload map[string]any
 	}
 
 	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO hysteria_users (node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		node.ID, data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], data["speed_limit_mbps"], data["expires_at"])
+		INSERT INTO hysteria_users (public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.generateUserPublicID(ctx), node.ID, data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], data["speed_limit_mbps"], data["expires_at"])
 	if err != nil {
 		return nil, normalizeDBError(err, "用户创建失败")
 	}
@@ -553,6 +554,9 @@ func (s *hysteriaService) getUserSubscriptionInfo(ctx context.Context, id int64,
 	if err != nil {
 		return nil, err
 	}
+	if err := s.ensureSubscriptionUsersOnAvailableNodes(ctx, decrypted); err != nil {
+		return nil, err
+	}
 	entries, err := s.resolveSubscriptionEntries(ctx, decrypted.Username)
 	if err != nil {
 		return nil, err
@@ -577,8 +581,8 @@ func (s *hysteriaService) getUserSubscriptionInfo(ctx context.Context, id int64,
 	}, nil
 }
 
-func (s *hysteriaService) renderUserSubscription(ctx context.Context, id int64, token string, format subscriptionFormat) (string, error) {
-	user, err := s.getStoredUser(ctx, id)
+func (s *hysteriaService) renderUserSubscription(ctx context.Context, publicID string, token string, format subscriptionFormat) (string, error) {
+	user, err := s.getStoredUserByPublicID(ctx, publicID)
 	if err != nil {
 		return "", err
 	}
@@ -594,6 +598,9 @@ func (s *hysteriaService) renderUserSubscription(ctx context.Context, id int64, 
 		return "", errors.New("订阅链接无效或已失效")
 	}
 
+	if err := s.ensureSubscriptionUsersOnAvailableNodes(ctx, decrypted); err != nil {
+		return "", err
+	}
 	entries, err := s.resolveSubscriptionEntries(ctx, decrypted.Username)
 	if err != nil {
 		return "", err
@@ -1054,6 +1061,37 @@ func (s *hysteriaService) getStoredNode(ctx context.Context, id int64) (*nodeRec
 	return &record, nil
 }
 
+func (s *hysteriaService) listStoredNodes(ctx context.Context) ([]nodeRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, current_node, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path,
+		       sudo_password, install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret,
+		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps,
+		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
+		       agent_install_path, agent_config_path, agent_service_name, created_at, updated_at
+		FROM server_nodes
+		ORDER BY current_node DESC, updated_at DESC, id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]nodeRecord, 0)
+	for rows.Next() {
+		record, err := scanNodeRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.decryptStoredNodeSecrets(&record); err != nil {
+			return nil, err
+		}
+		items = append(items, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (s *hysteriaService) getNodeOrCurrent(ctx context.Context, nodeID int64) (*nodeRecord, error) {
 	return s.getStoredNode(ctx, nodeID)
 }
@@ -1080,8 +1118,26 @@ func (s *hysteriaService) decryptStoredNodeSecrets(record *nodeRecord) error {
 
 func (s *hysteriaService) getStoredUser(ctx context.Context, id int64) (*userRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
 		FROM hysteria_users WHERE id = ? LIMIT 1`, id)
+	record, err := scanUserRecord(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &record, nil
+}
+
+func (s *hysteriaService) getStoredUserByPublicID(ctx context.Context, publicID string) (*userRecord, error) {
+	publicID = strings.TrimSpace(publicID)
+	if publicID == "" {
+		return nil, nil
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+		FROM hysteria_users WHERE public_id = ? LIMIT 1`, publicID)
 	record, err := scanUserRecord(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1140,6 +1196,7 @@ func (s *hysteriaService) presentUser(record userRecord, canViewSensitive bool) 
 	}
 	return map[string]any{
 		"id":               item.ID,
+		"public_id":        item.PublicID,
 		"node_id":          item.NodeID,
 		"username":         item.Username,
 		"auth_password":    item.AuthPassword,
@@ -1435,6 +1492,44 @@ type subscriptionEntry struct {
 	User userRecord
 }
 
+func (s *hysteriaService) ensureSubscriptionUsersOnAvailableNodes(ctx context.Context, template userRecord) error {
+	if !isUserSubscribable(template) {
+		return nil
+	}
+
+	nodes, err := s.listStoredNodes(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, node := range nodes {
+		if !s.isNodeAvailableForSubscription(ctx, node) {
+			continue
+		}
+		existing, err := s.findStoredUserByNodeAndUsername(ctx, node.ID, template.Username)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			continue
+		}
+
+		encryptedPassword, err := EncryptValue(template.AuthPassword, *s.cfg)
+		if err != nil {
+			return errors.New("用户认证密码加密失败")
+		}
+		if _, err := s.db.ExecContext(ctx, `
+			INSERT INTO hysteria_users (public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			s.generateUserPublicID(ctx), node.ID, template.Username, encryptedPassword, template.Status, template.QuotaGB, template.UsedGB, template.SpeedLimitMbps, template.ExpiresAt); err != nil {
+			return normalizeDBError(err, "订阅用户同步失败")
+		}
+		s.queueLocalAuthRefresh(ctx, node, nil)
+	}
+
+	return nil
+}
+
 func (s *hysteriaService) resolveSubscriptionEntries(ctx context.Context, username string) ([]subscriptionEntry, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
@@ -1442,7 +1537,7 @@ func (s *hysteriaService) resolveSubscriptionEntries(ctx context.Context, userna
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
 		FROM hysteria_users WHERE username = ? ORDER BY id DESC`, username)
 	if err != nil {
 		return nil, err
@@ -1490,7 +1585,7 @@ func (s *hysteriaService) buildUserSubscriptionURL(user userRecord, apiBaseURL s
 	if baseURL == "" {
 		baseURL = "http://127.0.0.1"
 	}
-	return strings.TrimRight(baseURL, "/") + fmt.Sprintf("/subscription/%d?token=%s", user.ID, url.QueryEscape(s.buildUserSubscriptionToken(user)))
+	return strings.TrimRight(baseURL, "/") + fmt.Sprintf("/subscription/%s?token=%s", url.PathEscape(user.PublicID), url.QueryEscape(s.buildUserSubscriptionToken(user)))
 }
 
 func (s *hysteriaService) buildUserSubscriptionToken(user userRecord) string {
@@ -1498,7 +1593,23 @@ func (s *hysteriaService) buildUserSubscriptionToken(user userRecord) string {
 	if s.cfg != nil {
 		secret = s.cfg.EncryptionKey
 	}
-	return signCookiePayload([]byte(fmt.Sprintf("subscription|%d|%s|%s|%s", user.ID, user.Username, user.AuthPassword, formatTime(user.UpdatedAt))), secret)
+	return signCookiePayload([]byte(fmt.Sprintf("subscription|%s|%s|%s|%s", user.PublicID, user.Username, user.AuthPassword, formatTime(user.UpdatedAt))), secret)
+}
+
+func (s *hysteriaService) generateUserPublicID(ctx context.Context) string {
+	for attempt := 0; attempt < 8; attempt++ {
+		hexValue, err := randomHex(10)
+		if err != nil {
+			continue
+		}
+		value := "usr_" + hexValue
+		var exists int
+		err = s.db.QueryRowContext(ctx, `SELECT 1 FROM hysteria_users WHERE public_id = ? LIMIT 1`, value).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return value
+		}
+	}
+	return "usr_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 }
 
 func (s *hysteriaService) canViewSensitiveFields(user *authUser) bool {
@@ -1552,7 +1663,7 @@ func (s *hysteriaService) listUsers(ctx context.Context, nodeID int64) ([]userRe
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
 		FROM hysteria_users WHERE node_id = ? ORDER BY id DESC`, node.ID)
 	if err != nil {
 		return nil, err
@@ -1575,7 +1686,7 @@ func (s *hysteriaService) listUsers(ctx context.Context, nodeID int64) ([]userRe
 
 func (s *hysteriaService) findStoredUserByNodeAndUsername(ctx context.Context, nodeID int64, username string) (*userRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
 		FROM hysteria_users WHERE node_id = ? AND username = ? LIMIT 1`, nodeID, username)
 	record, err := scanUserRecord(row)
 	if err != nil {
@@ -2495,7 +2606,7 @@ func scanNodeRecord(scanner interface{ Scan(...any) error }) (nodeRecord, error)
 
 func scanUserRecord(scanner interface{ Scan(...any) error }) (userRecord, error) {
 	var record userRecord
-	err := scanner.Scan(&record.ID, &record.NodeID, &record.Username, &record.AuthPassword, &record.Status, &record.QuotaGB, &record.UsedGB, &record.SpeedLimitMbps, &record.ExpiresAt, &record.CreatedAt, &record.UpdatedAt)
+	err := scanner.Scan(&record.ID, &record.PublicID, &record.NodeID, &record.Username, &record.AuthPassword, &record.Status, &record.QuotaGB, &record.UsedGB, &record.SpeedLimitMbps, &record.ExpiresAt, &record.CreatedAt, &record.UpdatedAt)
 	return record, err
 }
 

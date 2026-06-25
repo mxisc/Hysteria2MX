@@ -372,6 +372,7 @@ export async function createUser(payload: HysteriaUserPayload): Promise<Hysteria
   if (await shouldUseMockPanel()) {
     return {
       id: Date.now(),
+      public_id: `usr_mock_${Date.now().toString(36)}`,
       node_id: getMockPanelState().currentNodeId ?? 101,
       ...payload,
       created_at: new Date().toISOString(),
@@ -434,6 +435,7 @@ export async function updateUser(id: number, payload: HysteriaUserPayload): Prom
   if (await shouldUseMockPanel()) {
     return {
       id,
+      public_id: `usr_mock_${id}`,
       node_id: getMockPanelState().currentNodeId ?? 101,
       ...payload,
       created_at: new Date().toISOString(),
@@ -461,7 +463,7 @@ export async function deleteUser(id: number): Promise<void> {
 export async function fetchUserSubscriptionInfo(id: number): Promise<UserSubscriptionInfo> {
   if (await shouldUseMockPanel()) {
     return {
-      url: `${window.location.origin}/subscription/${id}?token=mock-subscription-token`,
+      url: `${window.location.origin}/subscription/usr_mock_${id}?token=mock-subscription-token`,
       username: `mock-user-${id}`,
       node_count: getMockNodes().length,
       nodes: getMockNodes().map((node) => ({
