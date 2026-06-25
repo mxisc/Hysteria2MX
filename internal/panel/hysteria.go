@@ -76,6 +76,13 @@ type userRecord struct {
 	UpdatedAt      time.Time
 }
 
+type subscriptionFormat string
+
+const (
+	subscriptionFormatURI   subscriptionFormat = "uri"
+	subscriptionFormatClash subscriptionFormat = "clash"
+)
+
 func newHysteriaService(db *sql.DB, cfg *Config, sshKeys *sshKeyUploadService, remote *remoteExecutor, agents *agentService) *hysteriaService {
 	return &hysteriaService{db: db, cfg: cfg, sshKeys: sshKeys, remote: remote, agents: agents}
 }
@@ -273,19 +280,67 @@ func (s *hysteriaService) deleteNode(ctx context.Context, id int64) error {
 		return errors.New("节点不存在")
 	}
 
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM server_nodes WHERE id = ?`, id); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var userCount int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM hysteria_users WHERE node_id = ?`, id).Scan(&userCount); err != nil {
+		return err
+	}
+
+	var nextID int64
+	if userCount > 0 {
+		if err := tx.QueryRowContext(ctx, `
+			SELECT n.id
+			FROM server_nodes n
+			WHERE n.id <> ?
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM hysteria_users source_users
+				JOIN hysteria_users target_users
+				  ON target_users.node_id = n.id
+				 AND target_users.username = source_users.username
+				WHERE source_users.node_id = ?
+			  )
+			ORDER BY n.current_node DESC, n.updated_at DESC, n.id DESC
+			LIMIT 1`, id, id).Scan(&nextID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errors.New("当前节点还有用户，且没有其他节点可无冲突接收这些用户，请先迁移或处理用户后再删除节点")
+			}
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE hysteria_users SET node_id = ? WHERE node_id = ?`, nextID, id); err != nil {
+			return err
+		}
+	} else {
+		_ = tx.QueryRowContext(ctx, `
+			SELECT id
+			FROM server_nodes
+			WHERE id <> ?
+			ORDER BY current_node DESC, updated_at DESC, id DESC
+			LIMIT 1`, id).Scan(&nextID)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM server_nodes WHERE id = ?`, id); err != nil {
+		return err
+	}
+
+	if node.CurrentNode == 1 && nextID > 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE server_nodes SET current_node = CASE WHEN id = ? THEN 1 ELSE 0 END`, nextID); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	if s.sshKeys != nil {
 		s.sshKeys.deleteManagedKey(node.SSHPrivateKeyPath, "")
 	}
 
-	if node.CurrentNode == 1 {
-		next, err := s.getStoredNode(ctx, 0)
-		if err == nil && next != nil {
-			_, _ = s.db.ExecContext(ctx, `UPDATE server_nodes SET current_node = CASE WHEN id = ? THEN 1 ELSE 0 END`, next.ID)
-		}
-	}
 	return nil
 }
 
@@ -522,7 +577,7 @@ func (s *hysteriaService) getUserSubscriptionInfo(ctx context.Context, id int64,
 	}, nil
 }
 
-func (s *hysteriaService) renderUserSubscription(ctx context.Context, id int64, token string) (string, error) {
+func (s *hysteriaService) renderUserSubscription(ctx context.Context, id int64, token string, format subscriptionFormat) (string, error) {
 	user, err := s.getStoredUser(ctx, id)
 	if err != nil {
 		return "", err
@@ -547,11 +602,61 @@ func (s *hysteriaService) renderUserSubscription(ctx context.Context, id int64, 
 		return "", errors.New("当前订阅暂无可用节点")
 	}
 
+	if format == subscriptionFormatClash {
+		return renderClashSubscriptionEntries(entries), nil
+	}
+	return renderURISubscriptionEntries(entries), nil
+}
+
+func renderURISubscriptionEntries(entries []subscriptionEntry) string {
 	lines := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		lines = append(lines, buildConnectionURIForNodeUser(entry.Node, entry.User))
 	}
-	return strings.Join(lines, "\n") + "\n", nil
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func renderClashSubscriptionEntries(entries []subscriptionEntry) string {
+	proxyNames := make([]string, 0, len(entries))
+	var builder strings.Builder
+	builder.WriteString("proxies:\n")
+	for _, entry := range entries {
+		name := entry.User.Username + "@" + entry.Node.Name
+		proxyNames = append(proxyNames, name)
+		builder.WriteString("  - name: " + yamlQuote(name) + "\n")
+		builder.WriteString("    type: hysteria2\n")
+		builder.WriteString("    server: " + yamlQuote(subscriptionServerHost(entry.Node)) + "\n")
+		builder.WriteString(fmt.Sprintf("    port: %d\n", entry.Node.ListenPort))
+		builder.WriteString("    password: " + yamlQuote(entry.User.AuthPassword) + "\n")
+		if normalizeTLSMode(entry.Node.TLSMode) == "self_signed" {
+			builder.WriteString("    skip-cert-verify: true\n")
+		}
+		if strings.TrimSpace(entry.Node.Domain) != "" {
+			builder.WriteString("    sni: " + yamlQuote(strings.TrimSpace(entry.Node.Domain)) + "\n")
+		}
+		if strings.TrimSpace(entry.Node.ObfsPassword) != "" {
+			builder.WriteString("    obfs: salamander\n")
+			builder.WriteString("    obfs-password: " + yamlQuote(entry.Node.ObfsPassword) + "\n")
+		}
+		upMbps, downMbps := subscriptionBandwidth(entry.Node, entry.User)
+		if upMbps > 0 {
+			builder.WriteString(fmt.Sprintf("    up: %s\n", yamlQuote(fmt.Sprintf("%d Mbps", upMbps))))
+		}
+		if downMbps > 0 {
+			builder.WriteString(fmt.Sprintf("    down: %s\n", yamlQuote(fmt.Sprintf("%d Mbps", downMbps))))
+		}
+	}
+
+	builder.WriteString("proxy-groups:\n")
+	builder.WriteString("  - name: " + yamlQuote("PROXY") + "\n")
+	builder.WriteString("    type: select\n")
+	builder.WriteString("    proxies:\n")
+	for _, name := range proxyNames {
+		builder.WriteString("      - " + yamlQuote(name) + "\n")
+	}
+	builder.WriteString("rules:\n")
+	builder.WriteString("  - MATCH,PROXY\n")
+	return builder.String()
 }
 
 func (s *hysteriaService) onlineClients(ctx context.Context, nodeID int64, page int, pageSize int) (map[string]any, error) {
@@ -2311,10 +2416,7 @@ func decodeTrafficJSONOutput(output string) map[string]any {
 }
 
 func buildConnectionURIForNodeUser(node nodeRecord, user userRecord) string {
-	host := strings.TrimSpace(node.Domain)
-	if host == "" {
-		host = strings.TrimSpace(node.Host)
-	}
+	host := subscriptionURIHost(node)
 
 	params := url.Values{}
 	if normalizeTLSMode(node.TLSMode) == "self_signed" {
@@ -2340,6 +2442,29 @@ func buildConnectionURIForNodeUser(node nodeRecord, user userRecord) string {
 	}
 	label := url.QueryEscape(user.Username + "@" + node.Name)
 	return fmt.Sprintf("hy2://%s@%s:%d%s#%s", url.QueryEscape(user.AuthPassword), host, node.ListenPort, query, label)
+}
+
+func subscriptionURIHost(node nodeRecord) string {
+	host := strings.TrimSpace(node.Domain)
+	if host == "" {
+		host = strings.TrimSpace(node.Host)
+	}
+	return host
+}
+
+func subscriptionServerHost(node nodeRecord) string {
+	return strings.Trim(subscriptionURIHost(node), "[]")
+}
+
+func subscriptionBandwidth(node nodeRecord, user userRecord) (int, int) {
+	if user.SpeedLimitMbps > 0 {
+		return user.SpeedLimitMbps, user.SpeedLimitMbps
+	}
+	return node.BandwidthUpMbps, node.BandwidthDownMbps
+}
+
+func yamlQuote(value string) string {
+	return strconv.Quote(value)
 }
 
 func isUserSubscribable(user userRecord) bool {
