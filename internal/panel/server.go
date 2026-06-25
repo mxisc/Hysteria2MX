@@ -216,14 +216,40 @@ func (a *App) handleSubscription(writer http.ResponseWriter, request *http.Reque
 		http.NotFound(writer, request)
 		return
 	}
-	content, err := a.hysteria.renderUserSubscription(request.Context(), id, strings.TrimSpace(request.URL.Query().Get("token")))
+	format := detectSubscriptionFormat(request)
+	content, err := a.hysteria.renderUserSubscription(request.Context(), id, strings.TrimSpace(request.URL.Query().Get("token")), format)
 	if err != nil {
 		writeError(writer, http.StatusForbidden, "订阅链接无效或当前没有可用节点")
 		return
 	}
-	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if format == subscriptionFormatClash {
+		writer.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	} else {
+		writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}
 	writer.Header().Set("Cache-Control", "no-store, private")
 	_, _ = writer.Write([]byte(content))
+}
+
+func detectSubscriptionFormat(request *http.Request) subscriptionFormat {
+	value := strings.ToLower(strings.TrimSpace(defaultString(
+		request.URL.Query().Get("format"),
+		request.URL.Query().Get("target"),
+	)))
+	switch value {
+	case "clash", "openclash", "mihomo", "clash-meta", "clashmeta":
+		return subscriptionFormatClash
+	case "uri", "hy2", "v2rayng", "v2ray":
+		return subscriptionFormatURI
+	}
+
+	userAgent := strings.ToLower(request.UserAgent())
+	if strings.Contains(userAgent, "openclash") ||
+		strings.Contains(userAgent, "clash") ||
+		strings.Contains(userAgent, "mihomo") {
+		return subscriptionFormatClash
+	}
+	return subscriptionFormatURI
 }
 
 func (a *App) handleAgentDownload(writer http.ResponseWriter, request *http.Request) {
