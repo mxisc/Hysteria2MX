@@ -369,6 +369,7 @@ function buildMockUsers(config: MockPanelConfig, nodes: HysteriaNodeConfig[]): H
     const used = Math.round(quota * (0.18 + (index % 7) * 0.09))
     return {
       id: 2000 + index,
+      public_id: `usr_mock_${String(index + 1).padStart(4, '0')}`,
       node_id: node.id,
       username: `user${String(index + 1).padStart(3, '0')}`,
       auth_password: `mock-pass-${index + 1}`,

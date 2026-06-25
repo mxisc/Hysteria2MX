@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS server_nodes (
 
 CREATE TABLE IF NOT EXISTS hysteria_users (
     id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    public_id VARCHAR(64) NOT NULL,
     node_id BIGINT UNSIGNED NOT NULL,
     username VARCHAR(64) NOT NULL,
     auth_password VARCHAR(255) NOT NULL,
@@ -59,6 +60,7 @@ CREATE TABLE IF NOT EXISTS hysteria_users (
     expires_at DATETIME NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_hysteria_users_public_id (public_id),
     UNIQUE KEY uniq_node_user (node_id, username),
     CONSTRAINT fk_hysteria_users_node FOREIGN KEY (node_id) REFERENCES server_nodes(id) ON DELETE CASCADE
 );

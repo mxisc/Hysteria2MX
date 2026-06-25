@@ -166,6 +166,7 @@ export interface SshKeyUploadResult {
 
 export interface HysteriaUser {
   id: number
+  public_id: string
   node_id: number
   username: string
   auth_password: string

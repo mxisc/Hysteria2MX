@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/mail"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -211,13 +212,13 @@ func (a *App) handleMockMode(writer http.ResponseWriter, request *http.Request) 
 }
 
 func (a *App) handleSubscription(writer http.ResponseWriter, request *http.Request) {
-	id, ok := parseTrailingID(request.URL.Path, "/subscription/")
-	if !ok {
+	publicID := parseTrailingValue(request.URL.Path, "/subscription/")
+	if publicID == "" {
 		http.NotFound(writer, request)
 		return
 	}
 	format := detectSubscriptionFormat(request)
-	content, err := a.hysteria.renderUserSubscription(request.Context(), id, strings.TrimSpace(request.URL.Query().Get("token")), format)
+	content, err := a.hysteria.renderUserSubscription(request.Context(), publicID, strings.TrimSpace(request.URL.Query().Get("token")), format)
 	if err != nil {
 		writeError(writer, http.StatusForbidden, "订阅链接无效或当前没有可用节点")
 		return
@@ -1634,6 +1635,31 @@ func parseTrailingID(path string, prefix string) (int64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+func parseTrailingValue(path string, prefix string) string {
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	value := strings.TrimPrefix(path, prefix)
+	if strings.Contains(value, "/") || value == "" {
+		return ""
+	}
+	unescaped, err := url.PathUnescape(value)
+	if err != nil {
+		return ""
+	}
+	unescaped = strings.TrimSpace(unescaped)
+	if len(unescaped) < 8 || len(unescaped) > 64 {
+		return ""
+	}
+	for _, char := range unescaped {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-' {
+			continue
+		}
+		return ""
+	}
+	return unescaped
 }
 
 func parsePathIDWithSuffix(path string, prefix string, suffix string) (int64, bool) {
