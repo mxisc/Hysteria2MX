@@ -2421,8 +2421,6 @@ async function handleSendTestNotification() {
             </div>
           </div>
 
-          <p class="helper-text traffic-sample-note">总下行/总上行来自最近一次节点采样：Agent 节点使用最近心跳上报的总量，SSH 节点采样时会读取 trafficStats 并汇总该节点所有用户流量。采样当前页会按顺序处理本页节点，避免并发压垮远端。</p>
-
           <div v-if="trafficNodeSummaries.length" class="traffic-node-grid">
             <article v-for="item in trafficNodeSummaries" :key="item.id" class="traffic-node-card">
               <div class="traffic-node-head">
