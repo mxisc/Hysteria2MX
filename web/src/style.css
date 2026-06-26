@@ -572,7 +572,8 @@ button {
   flex: 1 1 auto;
   min-height: 0;
   gap: 10px;
-  margin: 8px 0 0;
+  margin: 4px 0 0;
+  padding-top: 4px;
   padding-right: 4px;
   overflow: auto;
 }
@@ -2030,6 +2031,10 @@ button {
   margin-top: 20px;
   width: 100%;
   min-height: 300px;
+}
+
+.traffic-sample-note {
+  margin: 12px 0 0;
 }
 
 .traffic-chart-canvas {
