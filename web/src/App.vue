@@ -817,16 +817,18 @@ async function loadTrafficHistory(page = trafficPage.value) {
 }
 
 async function handleRefreshTrafficHistory() {
-  trafficHistoryLoaded.value = false
-  await loadTrafficHistory()
-}
-
-async function handleSampleTrafficHistory() {
-  if (!hasPermission('traffic.sync') || busyAction.value !== '') {
+  if (busyAction.value !== '') {
     return
   }
 
-  await withBusyAction('traffic-sample', async () => {
+  trafficHistoryLoaded.value = false
+  if (!hasPermission('traffic.sync')) {
+    await loadTrafficHistory()
+    await refreshTrafficNodeRuntimeStatuses()
+    return
+  }
+
+  await withBusyAction('traffic-refresh', async () => {
     let lastResult: RemoteCommandResult | null = null
     const nodeIds = trafficNodeSummaries.value.map((item) => item.id)
     if (!nodeIds.length) {
@@ -841,8 +843,9 @@ async function handleSampleTrafficHistory() {
     }
     await loadState()
     await loadTrafficHistory(trafficPage.value)
+    await refreshTrafficNodeRuntimeStatuses()
     return lastResult
-  }, '已完成当前页节点流量采样', false)
+  }, '已刷新当前页节点流量', false)
 }
 
 function renderTrafficChart() {
@@ -1121,21 +1124,22 @@ async function loadState() {
   ensureSectionAccess()
 }
 
-async function refreshNodeRuntimeStatuses() {
-  if (refreshingNodeStatuses.value || !nodes.value.length || !hasPermission('service.view')) {
+async function refreshNodeRuntimeStatuses(targetNodeIds?: number[]) {
+  const nodeIds = targetNodeIds ?? nodes.value.map((node) => node.id)
+  if (refreshingNodeStatuses.value || !nodeIds.length || !hasPermission('service.view')) {
     return
   }
 
   refreshingNodeStatuses.value = true
-  const statusMap: Record<number, ServiceStatus | 'unknown'> = {}
+  const statusMap: Record<number, ServiceStatus | 'unknown'> = targetNodeIds ? { ...nodeRuntimeStatuses.value } : {}
 
   try {
-    for (const node of nodes.value) {
+    for (const nodeId of nodeIds) {
       try {
-        const result = await performServiceAction('status', node.id)
-        statusMap[node.id] = result.exitCode === 0 ? 'running' : 'stopped'
+        const result = await performServiceAction('status', nodeId)
+        statusMap[nodeId] = result.exitCode === 0 ? 'running' : 'stopped'
       } catch {
-        statusMap[node.id] = 'stopped'
+        statusMap[nodeId] = 'stopped'
       }
     }
   } finally {
@@ -1143,6 +1147,11 @@ async function refreshNodeRuntimeStatuses() {
   }
 
   nodeRuntimeStatuses.value = statusMap
+}
+
+async function refreshTrafficNodeRuntimeStatuses() {
+  const nodeIds = [...new Set(trafficNodeSummaries.value.map((item) => item.id))]
+  await refreshNodeRuntimeStatuses(nodeIds)
 }
 
 async function loadLogs() {
@@ -1404,6 +1413,9 @@ async function setSection(id: SectionId) {
     } else if (id === 'overview') {
       await nextTick()
       renderTrafficChart()
+    }
+    if (id === 'traffic') {
+      await refreshTrafficNodeRuntimeStatuses()
     }
   }
 
@@ -1807,12 +1819,18 @@ function handleUserPageSizeChange() {
 
 function setTrafficPage(page: number) {
   trafficPage.value = Math.max(1, Math.min(trafficPagination.value.totalPages, page))
-  void loadTrafficHistory(trafficPage.value)
+  void (async () => {
+    await loadTrafficHistory(trafficPage.value)
+    await refreshTrafficNodeRuntimeStatuses()
+  })()
 }
 
 function handleTrafficPageSizeChange() {
   trafficPage.value = 1
-  void loadTrafficHistory(1)
+  void (async () => {
+    await loadTrafficHistory(1)
+    await refreshTrafficNodeRuntimeStatuses()
+  })()
 }
 
 function setAdminPage(page: number) {
@@ -2414,10 +2432,9 @@ async function handleSendTestNotification() {
               <h3>各节点流量信息</h3>
             </div>
             <div class="hero-actions">
-              <button v-if="hasPermission('traffic.sync')" class="secondary" :disabled="busyAction !== ''" @click="handleSampleTrafficHistory">
-                {{ busyAction === 'traffic-sample' ? '采样中...' : '采样当前页' }}
+              <button class="secondary" :disabled="busyAction !== ''" @click="handleRefreshTrafficHistory">
+                {{ busyAction === 'traffic-refresh' ? '刷新中...' : '刷新' }}
               </button>
-              <button class="secondary" :disabled="busyAction !== ''" @click="handleRefreshTrafficHistory">刷新</button>
             </div>
           </div>
 
@@ -2429,7 +2446,6 @@ async function handleSendTestNotification() {
                   <p>{{ item.host }}</p>
                 </div>
                 <div class="traffic-node-head-meta">
-                  <span v-if="item.currentNode" class="node-current-badge">当前</span>
                   <span class="user-status" :class="resolveNodeRuntimeStatus(item.id) === 'unknown' ? 'suspended' : resolveNodeRuntimeStatus(item.id)">
                     {{ nodeRuntimeStatusLabel(item.id) }}
                   </span>
