@@ -10,10 +10,11 @@ Installation policy:
 - For project-local dependencies, follow the project’s existing package manager, lockfiles, and dependency conventions. Do not perform global installs unless the user explicitly approves.
 
 Project memory policy:
-- Whenever you encounter and solve a concrete project-specific problem, immediately check the project root `AI_PROJECT.md`.
-- If the lesson is not already recorded, add a concise reusable note.
-- Each note should include the problem symptom, the cause or trigger if known, and the fix or prevention rule.
-- Do not write diary-style progress logs, vague observations, or duplicate notes.
+- Treat `AI_PROJECT.md` as a compact reusable rulebook, not a task log.
+- Before writing to it, first decide whether the lesson is likely to change future work across multiple tasks. If it is a one-off bug, ordinary implementation detail, temporary workaround, obvious cleanup, or already covered by an existing broader rule, do not add a new note.
+- When a note is needed, prefer updating or merging into an existing rule instead of appending a new item. Keep the wording short and general enough to be reused.
+- Each note should name the recurring problem, the trigger or cause when useful, and the prevention rule. Avoid long incident narratives, command transcripts, diary-style progress logs, vague observations, and duplicates.
+- At most one `AI_PROJECT.md` update should normally be needed for a task. If several lessons appear, consolidate them into one broader rule or leave low-value details out.
 
 Cleanup policy:
 - Before finishing each task, review the changes and decide whether the task left behind unused, redundant, temporary, or dead code.

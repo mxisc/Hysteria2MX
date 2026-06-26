@@ -821,6 +821,30 @@ async function handleRefreshTrafficHistory() {
   await loadTrafficHistory()
 }
 
+async function handleSampleTrafficHistory() {
+  if (!hasPermission('traffic.sync') || busyAction.value !== '') {
+    return
+  }
+
+  await withBusyAction('traffic-sample', async () => {
+    let lastResult: RemoteCommandResult | null = null
+    const nodeIds = trafficNodeSummaries.value.map((item) => item.id)
+    if (!nodeIds.length) {
+      lastResult = await syncTrafficUsage()
+    } else {
+      for (const nodeId of nodeIds) {
+        lastResult = await syncTrafficUsage(nodeId)
+      }
+    }
+    if (lastResult) {
+      operationOutput.value = lastResult
+    }
+    await loadState()
+    await loadTrafficHistory(trafficPage.value)
+    return lastResult
+  }, '已完成当前页节点流量采样', false)
+}
+
 function renderTrafficChart() {
   const container = trafficChartContainer.value
   if (!container) return
@@ -2389,8 +2413,15 @@ async function handleSendTestNotification() {
               <p class="eyebrow">节点流量</p>
               <h3>各节点流量信息</h3>
             </div>
-            <button class="secondary" :disabled="busyAction !== ''" @click="handleRefreshTrafficHistory">刷新</button>
+            <div class="hero-actions">
+              <button v-if="hasPermission('traffic.sync')" class="secondary" :disabled="busyAction !== ''" @click="handleSampleTrafficHistory">
+                {{ busyAction === 'traffic-sample' ? '采样中...' : '采样当前页' }}
+              </button>
+              <button class="secondary" :disabled="busyAction !== ''" @click="handleRefreshTrafficHistory">刷新</button>
+            </div>
           </div>
+
+          <p class="helper-text traffic-sample-note">总下行/总上行来自最近一次节点采样：Agent 节点使用最近心跳上报的总量，SSH 节点采样时会读取 trafficStats 并汇总该节点所有用户流量。采样当前页会按顺序处理本页节点，避免并发压垮远端。</p>
 
           <div v-if="trafficNodeSummaries.length" class="traffic-node-grid">
             <article v-for="item in trafficNodeSummaries" :key="item.id" class="traffic-node-card">
@@ -2470,7 +2501,6 @@ async function handleSendTestNotification() {
             <article v-for="node in nodeList" :key="node.id" class="node-inline-row">
               <span class="node-inline-name">
                 <strong>{{ node.name }}</strong>
-                <span v-if="node.current_node" class="node-current-badge">当前</span>
               </span>
               <span class="node-inline-status">
                 <span class="user-status" :class="resolveNodeRuntimeStatus(node.id) === 'unknown' ? 'suspended' : resolveNodeRuntimeStatus(node.id)">
@@ -3513,7 +3543,7 @@ async function handleSendTestNotification() {
       </section>
     </div>
 
-    <div v-if="showUserDeleteModal" class="modal-overlay" @click.self="closeUserDeleteModal">
+    <div v-if="showUserDeleteModal" class="modal-overlay">
       <section class="modal-card confirm-modal-card">
         <div class="confirm-modal-body">
           <p class="entity-copy">是否删除用户：{{ pendingDeleteUser?.username || '-' }}</p>
@@ -3526,7 +3556,7 @@ async function handleSendTestNotification() {
       </section>
     </div>
 
-    <div v-if="showNodeDeleteModal" class="modal-overlay" @click.self="closeNodeDeleteModal">
+    <div v-if="showNodeDeleteModal" class="modal-overlay">
       <section class="modal-card confirm-modal-card">
         <div class="confirm-modal-body">
           <p class="entity-copy">是否删除节点：{{ pendingDeleteNode?.name || '-' }}</p>
@@ -3539,7 +3569,7 @@ async function handleSendTestNotification() {
       </section>
     </div>
 
-    <div v-if="showAdminDeleteModal" class="modal-overlay" @click.self="closeAdminDeleteModal">
+    <div v-if="showAdminDeleteModal" class="modal-overlay">
       <section class="modal-card confirm-modal-card">
         <div class="confirm-modal-body">
           <p class="entity-copy">是否删除管理员：{{ pendingDeleteAdmin?.username || '-' }}</p>
@@ -3552,7 +3582,7 @@ async function handleSendTestNotification() {
       </section>
     </div>
 
-    <div v-if="showSubscriptionModal" class="modal-overlay" @click.self="closeSubscriptionModal">
+    <div v-if="showSubscriptionModal" class="modal-overlay">
       <section class="modal-card qr-modal-card">
         <div class="section-head section-head-wrap">
           <div>

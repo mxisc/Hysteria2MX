@@ -1,110 +1,151 @@
-# Hysteria2 Web 控制面板
+# Hysteria2MX
 
-轻量级 Hysteria2 多节点管理面板，面板运行时采用 `Go Panel + MySQL + Vue 3 + TypeScript` 架构。
+Hysteria2MX 是一个面向 Hysteria2 的 Web 控制面板，用于集中管理多节点服务、用户账号、流量统计和订阅分发。项目采用 Go 后端、Vue 3 前端和 MySQL 存储，适合自建 Hysteria2 节点的个人或小团队使用。
 
-## 功能
+## 功能特性
 
-- 节点管理、用户管理、流量统计、权限控制
-- 支持用户订阅链接，同用户名可聚合多节点下发
-- `Agent` / `SSH` 双运维模式，默认推荐 `Agent`
-- 邮件通知、登录防暴力破解、在线升级
-- GitLab CI 自动部署与 Tag 发布
+- 多节点管理：新增、编辑、安装、卸载、启停和配置下发
+- 用户管理：账号状态、到期时间、流量配额、实时用量和订阅链接
+- 节点 Agent：支持节点状态上报、任务执行、日志读取和本地认证同步
+- 流量统计：展示节点总览、用户用量、在线连接和历史趋势
+- 权限与审计：支持管理员角色、操作审计、登录保护和安全提示
+- 系统设置：支持站点信息、公网 API 地址、Mock 演示数据和 SMTP 通知
+- 首次安装向导：浏览器中完成数据库初始化和管理员账号创建
 
-## 运维边界
+## 技术栈
 
-- `SSH`：首次安装、首次写配置、首次下发 Agent、卸载清理
-- `Agent`：启停、日志、状态、流量、配置下发
-- `trafficStats`：节点本地统计接口，由 Agent 或 SSH 请求
+- 后端：Go `1.23+`
+- 前端：Vue 3、TypeScript、Vite
+- 数据库：MySQL `5.7+` 或 MariaDB `10.2+`
+- 部署：推荐使用 Linux、systemd，以及 Nginx 或 Caddy 反向代理
 
-## 系统要求
+## 部署形态
 
-- Go `>= 1.23`
-- MySQL `>= 5.7` 或 MariaDB `>= 10.2`
-- Node.js `>= 18`（前端开发和构建）
-- Nginx / Caddy
+Hysteria2MX 支持两种运行形态：
 
-## 部署
+- 生产部署：构建前端静态资源和 Go 面板二进制，由 Go 面板提供 Web 页面与 API，再通过 Nginx 或 Caddy 暴露公网入口
+- 开发部署：Go 后端和 Vite 前端分开运行，前端开发服务器通过代理访问后端 API
 
-- 下载仓库代码
-- 生产入口由 `Caddy/Nginx` 反代到 Go 面板监听地址
-- Go 面板支持无配置首启：直接运行二进制会默认监听 `127.0.0.1:18080`，完成首次初始化后自动写出 `config/panel.env`
-- `config/panel.env.example` 只保留最小启动项；`public_api_base_url` 等运营配置可在首次安装或系统设置中补齐
-- 默认配置、数据库初始化脚本和外部静态目录都会优先按 `config/panel.env` 或 `build/panel/mxinhy-panel` 的实际位置推导，不再依赖当前 shell 的工作目录
-- `PANEL_PUBLIC_API_BASE_URL` 建议显式配置为可被节点和订阅客户端访问的公网 API 地址，例如 `https://panel.example.com/api`；如果误填为站点根地址，后端会自动规范化为 `/api`
-- 数据库继续使用 MySQL，节点与 Agent 部署方式保持不变
-- 新环境按纯 Go 面板部署，不依赖 PHP-FPM、Apache 或 legacy PHP 服务
-- 首次节点安装前会自动检查并补装常用依赖；当前支持在常见 Linux 包管理器上自动安装 `curl`，自签证书模式还会自动补装 `openssl`，若当前账号缺少 root/sudo 权限则会直接提示
+## 生产部署
 
-## 目录结构
-
-```text
-artifacts/agent/        Agent 可分发二进制
-cmd/                    Go 可执行入口
-config/                 面板环境变量示例
-database/               初始化结构与迁移脚本
-deploy/systemd/         systemd 服务模板
-internal/               Go 面板核心实现
-public/                 Web 构建产物与运行目录
-storage/                运行时目录
-web/                    Vue 3 前端源码
-```
-
-## 开发
+安装依赖并构建前端静态资源：
 
 ```bash
-npm install
-npm run dev
+npm ci
 npm run build
-go run ./cmd/mxinhy-panel
-go run ./cmd/mxinhy-panel -port 18081
 ```
 
-重新构建 Agent 二进制：
+构建 Go 面板：
+
+```bash
+go build -o build/panel/mxinhy-panel ./cmd/mxinhy-panel
+```
+
+启动生产服务：
+
+```bash
+./build/panel/mxinhy-panel
+```
+
+默认监听地址为 `127.0.0.1:18080`。首次启动时可以不准备 `config/panel.env`，打开面板页面后按安装向导填写 MySQL 信息和管理员账号，系统会自动初始化数据库并写入运行配置。
+
+如需临时指定端口：
+
+```bash
+./build/panel/mxinhy-panel -port 18081
+```
+
+生产环境建议使用 Nginx 或 Caddy 将公网 HTTPS 入口反向代理到面板监听地址，例如 `127.0.0.1:18080`。
+
+最小配置示例见 `config/panel.env.example`：
+
+```env
+PANEL_BIND_ADDR=127.0.0.1:18080
+PANEL_ENCRYPTION_KEY=change-this-to-a-random-secret
+PANEL_LOGIN_AES_SEED=change-this-to-a-random-seed
+
+DB_HOST=127.0.0.1
+DB_NAME=hy2_panel
+DB_USER=root
+DB_PASSWORD=change-me
+```
+
+如果需要节点 Agent、订阅链接或远端回调正常工作，请在安装向导或系统设置中配置公网 API 地址，例如：
+
+```text
+https://panel.example.com/api
+```
+
+项目提供 systemd 模板：
+
+- `deploy/systemd/mxinhy-panel.service`
+- `deploy/systemd/mxinhy-agent.service`
+
+模板中的占位符需要替换为实际安装路径后再使用。
+
+## 开发部署
+
+开发时建议分别启动后端和前端。
+
+后端默认开发端口可使用 `8080`，与 Vite 代理配置保持一致：
+
+```bash
+go run ./cmd/mxinhy-panel -port 8080
+```
+
+前端开发服务器：
+
+```bash
+npm ci
+npm run dev
+```
+
+如果后端使用其他端口，可以通过 `VITE_API_TARGET` 指定 API 代理目标：
+
+```bash
+VITE_API_TARGET=http://127.0.0.1:18080 npm run dev
+```
+
+运行测试：
+
+```bash
+go test ./...
+```
+
+## Agent 构建
+
+节点 Agent 用于减少 SSH 依赖，并让节点主动上报状态、执行任务和同步本地认证数据。
+
+构建 Linux Agent：
 
 ```bash
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o artifacts/agent/mxinhy-agent-linux-amd64 ./cmd/mxinhy-agent
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o artifacts/agent/mxinhy-agent-linux-arm64 ./cmd/mxinhy-agent
 ```
 
-## CI
+首次安装节点仍需要可用的 SSH 连接。面板会通过 SSH 完成初始安装、配置写入和 Agent 下发；后续常规操作优先通过 Agent 执行。
 
-- 推送到 `main`：仅在受保护分支且推送者与 `DEPLOY_TRIGGER_LOGIN` 一致时，自动执行构建并部署到生产环境
-- 推送版本 Tag：仅在受保护 Tag 且推送者与 `DEPLOY_TRIGGER_LOGIN` 一致时，自动执行构建、部署，并在 GitLab 创建对应 Release
-- Tag 发版时，Panel 二进制会使用 `release_embed` 构建标签将当前 `public/` 前端资源嵌入到 `mxinhy-panel` 中
-- CI 构建阶段会同时生成前端产物、`build/panel/mxinhy-panel`，以及 `artifacts/agent/` 下的 Linux `amd64`/`arm64` Agent 二进制
-- `main` 分支部署包仍包含外部 `public/` 静态目录以保持兼容；Tag 最终部署包会省略 `public/`，只保留最小运行时目录
-- CI 最终部署包只包含运行时所需目录：`build/panel/`、`artifacts/agent/`、`deploy/systemd/`、`config/panel.env.example`、`database/schema.sql`、`database/migrations/`、`package.json`，以及仅在非 Tag 部署包中保留的 `public/`
-- 由于仓库需要同步到 GitHub 作为公开镜像，`.gitlab-ci.yml` 不应包含任何真实主机、目录、密钥或账号，所有敏感信息都必须放在 GitLab CI Variables 中
+## 目录结构
 
-推荐变量：
-
-- `DEPLOY_TRIGGER_LOGIN`
-- `SSH_PRIVATE_KEY`
-- `DEPLOY_HOST`
-- `DEPLOY_PORT`
-- `DEPLOY_USER`
-- `DEPLOY_PATH`
-- `DEPLOY_KNOWN_HOSTS`
-- `DEPLOY_KEEP_RELEASES`
-- `PANEL_SERVICE_NAME`
-- 登录页密码加密不再依赖前端构建时注入长期 seed；前端会在 `/api/auth/login-challenge` 响应中读取后端下发的一次性派生 seed
-
-## 常用命令
-
-```bash
-go build -o build/panel/mxinhy-panel ./cmd/mxinhy-panel
-go run ./cmd/mxinhy-panel
-./build/panel/mxinhy-panel -port 18081
-./build/panel/mxinhy-panel -config config/panel.env run-job install <job-id>
+```text
+cmd/                    Go 可执行入口
+internal/panel/         面板后端核心代码
+web/                    Vue 前端源码
+public/                 前端构建产物
+config/                 面板配置示例
+database/               初始化结构、迁移脚本和变更说明
+deploy/systemd/         systemd 服务模板
+artifacts/agent/        Agent 构建产物
+storage/                运行时数据目录
 ```
 
 ## 安全说明
 
-- 禁止在仓库中提交真实域名、真实 IP 或生产路径
-- SSH 私钥必须通过上传流程进入 `storage/ssh-keys`
-- 面板公网入口统一由 `Caddy/Nginx` 反代到 Go 面板
-- 所有多条数据接口都必须维持后端分页
-- 管理后台桌面端必须保持 `100vh` 固定布局，超出内容只允许局部滚动
+- 不要将真实密钥、数据库密码、SSH 私钥、生产域名或服务器 IP 提交到仓库
+- `PANEL_ENCRYPTION_KEY` 和 `PANEL_LOGIN_AES_SEED` 生产环境必须改为随机值
+- 面板公网入口应使用 HTTPS，并只暴露反向代理后的服务
+- SSH 私钥应通过面板上传流程管理，不建议手动填写服务器本地路径
+- 面板返回给用户的错误信息应保持安全、简洁，不暴露内部路径、SQL 或堆栈信息
 
 ## 许可证
 
