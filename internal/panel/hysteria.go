@@ -1351,7 +1351,7 @@ func (s *hysteriaService) normalizeNodePayload(payload map[string]any, current *
 		"bandwidth_down_mbps":              boundedInt(payload["bandwidth_down_mbps"], 0, 100000, maxInt(intValue(currentMap["bandwidth_down_mbps"]), 200)),
 		"manage_mode":                      normalizeManageMode(defaultString(toTrimmedString(payload["manage_mode"]), defaultString(toString(currentMap["manage_mode"]), "agent"))),
 		"agent_enabled":                    toBool(payload["agent_enabled"], boolValue(currentMap["agent_enabled"], true)),
-		"agent_report_interval_seconds":    boundedInt(payload["agent_report_interval_seconds"], 1, 86400, maxInt(intValue(currentMap["agent_report_interval_seconds"]), 5)),
+		"agent_report_interval_seconds":    boundedInt(payload["agent_report_interval_seconds"], 1, 86400, maxInt(intValue(currentMap["agent_report_interval_seconds"]), 2)),
 		"agent_task_poll_interval_seconds": boundedInt(payload["agent_task_poll_interval_seconds"], 1, 86400, maxInt(intValue(currentMap["agent_task_poll_interval_seconds"]), 1)),
 		"agent_install_path":               defaultString(toTrimmedString(payload["agent_install_path"]), defaultString(toString(currentMap["agent_install_path"]), "/usr/local/bin/mxinhy-agent")),
 		"agent_config_path":                defaultString(toTrimmedString(payload["agent_config_path"]), defaultString(toString(currentMap["agent_config_path"]), "/etc/mxinhy-agent.json")),

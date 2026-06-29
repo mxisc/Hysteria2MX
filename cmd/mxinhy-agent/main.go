@@ -235,7 +235,7 @@ func loadConfig(path string) (config, error) {
 		return config{}, errors.New("agent config is incomplete")
 	}
 	if cfg.ReportIntervalSeconds < 1 {
-		cfg.ReportIntervalSeconds = 5
+		cfg.ReportIntervalSeconds = 2
 	}
 	if cfg.TaskPollIntervalSeconds < 1 {
 		cfg.TaskPollIntervalSeconds = 1
@@ -326,7 +326,7 @@ func (a *agent) setLastHeartbeatSuccess(value time.Time) {
 func (a *agent) heartbeatDisableAfter() time.Duration {
 	reportInterval := a.cfg.ReportIntervalSeconds
 	if reportInterval < 1 {
-		reportInterval = 5
+		reportInterval = 2
 	}
 	return time.Duration(reportInterval*heartbeatFailureGraceMultiplier) * time.Second
 }

@@ -60,7 +60,7 @@ func (s *agentService) ensureAgentRecordForNode(ctx context.Context, node nodeRe
 		return nil, err
 	}
 
-	reportInterval := maxInt(node.AgentReportIntervalSeconds, 5)
+	reportInterval := maxInt(node.AgentReportIntervalSeconds, 2)
 	taskPollInterval := maxInt(node.AgentTaskPollIntervalSeconds, 1)
 	if existing != nil {
 		_, err = s.db.ExecContext(ctx, `
@@ -129,7 +129,7 @@ func (s *agentService) effectiveStatus(record map[string]any) string {
 	}
 	status := toString(record["status"])
 	lastSeenText := toString(record["last_seen_at"])
-	reportInterval := maxInt(intValue(record["report_interval_seconds"]), 5)
+	reportInterval := maxInt(intValue(record["report_interval_seconds"]), 2)
 	if lastSeenText != "" {
 		if lastSeen, err := time.Parse("2006-01-02 15:04:05", lastSeenText); err == nil {
 			if lastSeen.Before(time.Now().Add(-time.Duration(reportInterval*agentOfflineGraceMultiplier) * time.Second)) {
