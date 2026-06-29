@@ -80,8 +80,9 @@ type userRecord struct {
 type subscriptionFormat string
 
 const (
-	subscriptionFormatURI   subscriptionFormat = "uri"
-	subscriptionFormatClash subscriptionFormat = "clash"
+	subscriptionFormatURI    subscriptionFormat = "uri"
+	subscriptionFormatClash  subscriptionFormat = "clash"
+	trafficSummaryWindowDays                    = 30
 )
 
 func newHysteriaService(db *sql.DB, cfg *Config, sshKeys *sshKeyUploadService, remote *remoteExecutor, agents *agentService) *hysteriaService {
@@ -865,20 +866,45 @@ func (s *hysteriaService) getTrafficOverview(ctx context.Context, hours int, pag
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			n.id, n.name, n.host, n.current_node,
-			latest.total_rx, latest.total_tx, latest.user_count, latest.online_count, latest.recorded_at
+			monthly.total_rx, monthly.total_tx, latest.user_count, latest.online_count, latest.recorded_at
 		FROM server_nodes n
 		LEFT JOIN (
-			SELECT h.node_id, h.total_rx, h.total_tx, h.user_count, h.online_count, h.recorded_at
+			SELECT h.node_id, h.user_count, h.online_count, h.recorded_at
 			FROM node_traffic_history h
 			INNER JOIN (
 				SELECT node_id, MAX(recorded_at) AS max_recorded_at
 				FROM node_traffic_history
-				WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
 				GROUP BY node_id
 			) grouped ON grouped.node_id = h.node_id AND grouped.max_recorded_at = h.recorded_at
 		) latest ON latest.node_id = n.id
+		LEFT JOIN (
+			SELECT
+				latest_in_range.node_id,
+				GREATEST(latest_in_range.total_rx - earliest_in_range.total_rx, 0) AS total_rx,
+				GREATEST(latest_in_range.total_tx - earliest_in_range.total_tx, 0) AS total_tx
+			FROM (
+				SELECT h.node_id, h.total_rx, h.total_tx, h.recorded_at
+				FROM node_traffic_history h
+				INNER JOIN (
+					SELECT node_id, MAX(recorded_at) AS max_recorded_at
+					FROM node_traffic_history
+					WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+					GROUP BY node_id
+				) grouped ON grouped.node_id = h.node_id AND grouped.max_recorded_at = h.recorded_at
+			) latest_in_range
+			INNER JOIN (
+				SELECT h.node_id, h.total_rx, h.total_tx, h.recorded_at
+				FROM node_traffic_history h
+				INNER JOIN (
+					SELECT node_id, MIN(recorded_at) AS min_recorded_at
+					FROM node_traffic_history
+					WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+					GROUP BY node_id
+				) grouped ON grouped.node_id = h.node_id AND grouped.min_recorded_at = h.recorded_at
+			) earliest_in_range ON earliest_in_range.node_id = latest_in_range.node_id
+		) monthly ON monthly.node_id = n.id
 		ORDER BY n.current_node DESC, n.updated_at DESC, n.id DESC
-		LIMIT ? OFFSET ?`, hours, pageSize, offset)
+		LIMIT ? OFFSET ?`, trafficSummaryWindowDays, trafficSummaryWindowDays, pageSize, offset)
 	if err != nil {
 		return nil, err
 	}

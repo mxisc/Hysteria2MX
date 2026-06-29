@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	embeddedassets "mxinhy"
@@ -44,7 +45,12 @@ type App struct {
 	sshKeys         *sshKeyUploadService
 	systemHealth    *systemHealthService
 	loginProtection *loginProtectionService
+	backgroundMu    sync.Mutex
+	backgroundWG    sync.WaitGroup
+	trafficSyncStop context.CancelFunc
 }
+
+const backgroundTrafficSyncInterval = 5 * time.Minute
 
 func NewServer(config Config, logger *log.Logger) (*http.Server, error) {
 	if logger == nil {
@@ -103,14 +109,100 @@ func NewServer(config Config, logger *log.Logger) (*http.Server, error) {
 		loginProtection: loginProtection,
 	}
 
-	return &http.Server{
+	server := &http.Server{
 		Addr:              config.BindAddr,
 		Handler:           app.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
-	}, nil
+	}
+	server.RegisterOnShutdown(app.shutdown)
+	app.startTrafficSyncLoop()
+	return server, nil
+}
+
+func (a *App) shutdown() {
+	a.stopTrafficSyncLoop()
+	if a.db != nil {
+		_ = a.db.Close()
+	}
+}
+
+func (a *App) startTrafficSyncLoop() {
+	if a == nil || a.db == nil || a.hysteria == nil {
+		return
+	}
+
+	a.backgroundMu.Lock()
+	if a.trafficSyncStop != nil {
+		a.backgroundMu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.trafficSyncStop = cancel
+	a.backgroundWG.Add(1)
+	a.backgroundMu.Unlock()
+
+	go func() {
+		defer a.backgroundWG.Done()
+		a.runTrafficSyncLoop(ctx)
+	}()
+}
+
+func (a *App) stopTrafficSyncLoop() {
+	a.backgroundMu.Lock()
+	cancel := a.trafficSyncStop
+	a.trafficSyncStop = nil
+	a.backgroundMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+		a.backgroundWG.Wait()
+	}
+}
+
+func (a *App) runTrafficSyncLoop(ctx context.Context) {
+	ticker := time.NewTicker(backgroundTrafficSyncInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.syncTrafficUsageForAllNodes(ctx)
+		}
+	}
+}
+
+func (a *App) syncTrafficUsageForAllNodes(ctx context.Context) {
+	if a == nil || a.hysteria == nil || a.db == nil {
+		return
+	}
+
+	nodes, err := a.hysteria.listStoredNodes(ctx)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Printf("background traffic sync list nodes failed: %v", err)
+		}
+		return
+	}
+
+	for _, node := range nodes {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		_, err := a.hysteria.syncTrafficUsage(syncCtx, true, node.ID)
+		cancel()
+		if err != nil && a.logger != nil {
+			a.logger.Printf("background traffic sync node %d failed: %v", node.ID, err)
+		}
+	}
 }
 
 func (a *App) routes() http.Handler {
@@ -457,6 +549,10 @@ func (a *App) handleSetupInit(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 
+	a.stopTrafficSyncLoop()
+	if a.db != nil && a.db != db {
+		_ = a.db.Close()
+	}
 	*a.config = config
 	a.db = db
 	a.auth = newAuthService(a.db, a.config)
@@ -467,6 +563,7 @@ func (a *App) handleSetupInit(writer http.ResponseWriter, request *http.Request)
 	a.jobs = newJobManager(*a.config)
 	a.hysteria = newHysteriaService(a.db, a.config, a.sshKeys, a.remote, a.agents)
 	a.systemHealth = newSystemHealthService(a.db, a.config)
+	a.startTrafficSyncLoop()
 
 	a.writeJSON(writer, http.StatusCreated, apiEnvelope{
 		Success: true,

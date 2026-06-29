@@ -117,7 +117,6 @@ type SetupEditorForm = SetupPayload
 
 type ToastType = 'success' | 'error' | 'info'
 
-const TRAFFIC_SYNC_INTERVAL_MS = 5 * 60 * 1000
 const NODE_STATUS_SYNC_INTERVAL_MS = 60 * 1000
 
 function createEmptyPanelState(): HysteriaPanelState {
@@ -503,7 +502,6 @@ let auditLogAutoRefreshTimer: number | null = null
 let userFilterTimer: number | null = null
 
 let toastTimer: number | null = null
-let trafficSyncTimer: number | null = null
 let nodeStatusSyncTimer: number | null = null
 let userTrafficStatsTimer: number | null = null
 let trafficChart: ECharts | null = null
@@ -588,8 +586,6 @@ const agentStatusLabelMap = {
   offline: '离线',
   error: '异常',
 } as const
-
-const hasNode = computed(() => Boolean(panel.value.node))
 
 const nodeList = computed(() => nodes.value)
 
@@ -744,13 +740,6 @@ function showToast(message: string, type: ToastType = 'success') {
   }, 3200)
 }
 
-function stopTrafficSyncTimer() {
-  if (trafficSyncTimer !== null) {
-    window.clearInterval(trafficSyncTimer)
-    trafficSyncTimer = null
-  }
-}
-
 function stopNodeStatusSyncTimer() {
   if (nodeStatusSyncTimer !== null) {
     window.clearInterval(nodeStatusSyncTimer)
@@ -828,9 +817,17 @@ async function handleRefreshTrafficHistory() {
     return
   }
 
-  await withBusyAction('traffic-refresh', async () => {
+  await syncTrafficUsageForTrafficView(true)
+}
+
+async function syncTrafficUsageForTrafficView(showSuccessMessage = false) {
+  const runSync = async () => {
+    if (!trafficHistoryLoaded.value) {
+      await loadTrafficHistory(trafficPage.value)
+    }
+
     let lastResult: RemoteCommandResult | null = null
-    const nodeIds = trafficNodeSummaries.value.map((item) => item.id)
+    const nodeIds = [...new Set(trafficNodeSummaries.value.map((item) => item.id))]
     if (!nodeIds.length) {
       lastResult = await syncTrafficUsage()
     } else {
@@ -845,7 +842,27 @@ async function handleRefreshTrafficHistory() {
     await loadTrafficHistory(trafficPage.value)
     await refreshTrafficNodeRuntimeStatuses()
     return lastResult
-  }, '已刷新当前页节点流量', false)
+  }
+
+  if (showSuccessMessage) {
+    await withBusyAction('traffic-refresh', runSync, '已刷新当前页节点流量', false)
+    return
+  }
+
+  if (!session.value || !hasPermission('traffic.sync') || busyAction.value !== '') {
+    return
+  }
+
+  busyAction.value = 'traffic-sync-enter'
+  try {
+    await runSync()
+  } catch (error) {
+    showToast(getErrorMessage(error), 'error')
+  } finally {
+    if (busyAction.value === 'traffic-sync-enter') {
+      busyAction.value = ''
+    }
+  }
 }
 
 function renderTrafficChart() {
@@ -1031,36 +1048,6 @@ function handleAuditLogRefreshModeChange() {
   } else {
     stopAuditLogAutoRefreshTimer()
   }
-}
-
-async function syncTrafficUsageInBackground() {
-  if (!session.value || !hasPermission('traffic.sync') || !hasNode.value || busyAction.value !== '') {
-    return
-  }
-
-  busyAction.value = 'traffic-sync-auto'
-  try {
-    const result = await syncTrafficUsage()
-    operationOutput.value = result
-    await loadState()
-  } catch {
-    // Ignore timer sync failures to avoid interrupting the current page.
-  } finally {
-    if (busyAction.value === 'traffic-sync-auto') {
-      busyAction.value = ''
-    }
-  }
-}
-
-function startTrafficSyncTimer() {
-  stopTrafficSyncTimer()
-  if (!session.value || !hasPermission('traffic.sync')) {
-    return
-  }
-
-  trafficSyncTimer = window.setInterval(() => {
-    void syncTrafficUsageInBackground()
-  }, TRAFFIC_SYNC_INTERVAL_MS)
 }
 
 async function syncNodeStatusesInBackground() {
@@ -1288,8 +1275,6 @@ async function bootstrap() {
         syncMockPanelConfigFromSettings()
         applyPublicAppSettings(systemSettingsForm.value)
       }
-      void syncTrafficUsageInBackground()
-      startTrafficSyncTimer()
       await setSection(currentSection.value)
     } catch (error) {
       showToast(getErrorMessage(error), 'error')
@@ -1347,7 +1332,6 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   clearToast()
-  stopTrafficSyncTimer()
   stopNodeStatusSyncTimer()
   stopAuditLogAutoRefreshTimer()
   stopUserTrafficStatsTimer()
@@ -1407,14 +1391,22 @@ async function setSection(id: SectionId) {
     }
   }
 
-  if ((id === 'overview' || id === 'traffic') && session.value && hasPermission('panel.view')) {
+  if (id === 'overview' && session.value && hasPermission('panel.view')) {
     if (!trafficHistoryLoaded.value) {
       await loadTrafficHistory()
-    } else if (id === 'overview') {
+    } else {
       await nextTick()
       renderTrafficChart()
     }
-    if (id === 'traffic') {
+  }
+
+  if (id === 'traffic' && session.value && hasPermission('panel.view')) {
+    if (!trafficHistoryLoaded.value) {
+      await loadTrafficHistory()
+    }
+    if (hasPermission('traffic.sync')) {
+      await syncTrafficUsageForTrafficView()
+    } else {
       await refreshTrafficNodeRuntimeStatuses()
     }
   }
@@ -1468,8 +1460,6 @@ async function handleLogin() {
       syncMockPanelConfigFromSettings()
       applyPublicAppSettings(systemSettingsForm.value)
     }
-    void syncTrafficUsageInBackground()
-    startTrafficSyncTimer()
     await setSection(currentSection.value)
   } catch (error) {
     loginError.value = getErrorMessage(error)
@@ -1502,7 +1492,6 @@ async function handleInitializeSetup() {
 }
 
 async function handleLogout() {
-  stopTrafficSyncTimer()
   stopNodeStatusSyncTimer()
   stopUserTrafficStatsTimer()
   await logout()
@@ -2429,7 +2418,7 @@ async function handleSendTestNotification() {
           <div class="section-head section-head-wrap">
             <div>
               <p class="eyebrow">节点流量</p>
-              <h3>各节点流量信息</h3>
+                <h3>各节点近 30 天流量信息</h3>
             </div>
             <div class="hero-actions">
               <button class="secondary" :disabled="busyAction !== ''" @click="handleRefreshTrafficHistory">
@@ -2458,11 +2447,11 @@ async function handleSendTestNotification() {
                   <strong>{{ item.onlineCount }}/{{ item.userCount }}</strong>
                 </div>
                 <div class="traffic-node-metric">
-                  <span>总下行</span>
+                  <span>30 天下行</span>
                   <strong>{{ formatChartBytes(item.totalRx) }}</strong>
                 </div>
                 <div class="traffic-node-metric">
-                  <span>总上行</span>
+                  <span>30 天上行</span>
                   <strong>{{ formatChartBytes(item.totalTx) }}</strong>
                 </div>
               </div>
