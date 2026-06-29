@@ -208,6 +208,7 @@ export function getMockUserTrafficStats(nodeId?: number | null): UserTrafficStat
     .filter((user) => !nodeId || user.node_id === nodeId)
     .slice(0, 18)
     .map((user, index) => ({
+      node_id: user.node_id,
       username: user.username,
       rx: (index + 1) * 1024 * 1024 * 128,
       tx: (index + 1) * 1024 * 1024 * 72,

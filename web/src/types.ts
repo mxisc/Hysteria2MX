@@ -215,6 +215,7 @@ export interface HysteriaOnlineClient {
 }
 
 export interface UserTrafficStats {
+  node_id: number
   username: string
   rx: number
   tx: number

@@ -75,14 +75,15 @@ type registerPayload struct {
 }
 
 type heartbeatPayload struct {
-	NodeID               int    `json:"node_id"`
-	Version              string `json:"version"`
-	ServiceStatus        string `json:"service_status"`
-	ServiceMessageBase64 string `json:"service_message_base64"`
-	TotalRX              uint64 `json:"total_rx"`
-	TotalTX              uint64 `json:"total_tx"`
-	UserCount            int    `json:"user_count"`
-	OnlineCount          int    `json:"online_count"`
+	NodeID               int                       `json:"node_id"`
+	Version              string                    `json:"version"`
+	ServiceStatus        string                    `json:"service_status"`
+	ServiceMessageBase64 string                    `json:"service_message_base64"`
+	TotalRX              uint64                    `json:"total_rx"`
+	TotalTX              uint64                    `json:"total_tx"`
+	UserCount            int                       `json:"user_count"`
+	OnlineCount          int                       `json:"online_count"`
+	UserTraffic          map[string]trafficCounter `json:"user_traffic"`
 }
 
 type pullTaskResponse struct {
@@ -148,6 +149,12 @@ type heartbeatSummary struct {
 	TotalTX        uint64
 	UserCount      int
 	OnlineCount    int
+	UserTraffic    map[string]trafficCounter
+}
+
+type trafficCounter struct {
+	RX int64 `json:"rx"`
+	TX int64 `json:"tx"`
 }
 
 type commandResult struct {
@@ -380,6 +387,7 @@ func (a *agent) sendHeartbeat() error {
 		TotalTX:              summary.TotalTX,
 		UserCount:            summary.UserCount,
 		OnlineCount:          summary.OnlineCount,
+		UserTraffic:          summary.UserTraffic,
 	}
 
 	return a.postJSON("/agent/heartbeat", payload, nil)
@@ -472,11 +480,15 @@ func (a *agent) collectHeartbeatSummary() heartbeatSummary {
 
 	var totalRX uint64
 	var totalTX uint64
+	userTraffic := make(map[string]trafficCounter, len(trafficData))
 	userCount := 0
-	for _, item := range trafficData {
+	for username, item := range trafficData {
 		if stats, ok := item.(map[string]interface{}); ok {
-			totalRX += uint64(numberFromAny(stats["rx"]))
-			totalTX += uint64(numberFromAny(stats["tx"]))
+			rx := numberFromAny(stats["rx"])
+			tx := numberFromAny(stats["tx"])
+			totalRX += uint64(rx)
+			totalTX += uint64(tx)
+			userTraffic[username] = trafficCounter{RX: rx, TX: tx}
 			userCount++
 		}
 	}
@@ -490,6 +502,7 @@ func (a *agent) collectHeartbeatSummary() heartbeatSummary {
 			TotalTX:        totalTX,
 			UserCount:      userCount,
 			OnlineCount:    0,
+			UserTraffic:    userTraffic,
 		}
 	}
 
@@ -500,6 +513,7 @@ func (a *agent) collectHeartbeatSummary() heartbeatSummary {
 		TotalTX:        totalTX,
 		UserCount:      userCount,
 		OnlineCount:    len(onlinePayload),
+		UserTraffic:    userTraffic,
 	}
 }
 
