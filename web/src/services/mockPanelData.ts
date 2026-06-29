@@ -253,17 +253,30 @@ export function getMockTrafficHistory(hours = 24, page = 1, pageSize = 12): Traf
       )
   })
 
-  const items = nodes.map((node, index) => ({
-    id: node.id,
-    name: node.name,
-    host: node.host,
-    currentNode: node.current_node === 1,
-    onlineCount: getMockOnlineClients(node.id).length,
-    userCount: users.filter((user) => user.node_id === node.id).length,
-    totalRx: nodeSeriesByNode[index]?.[samples - 1]?.total_rx ?? 0,
-    totalTx: nodeSeriesByNode[index]?.[samples - 1]?.total_tx ?? 0,
-    recordedAt: `2026-06-04 ${String(samples - 1).padStart(2, '0')}:00:00`,
-  }))
+  const items = nodes.map((node, index) => {
+    const nodeSeries = nodeSeriesByNode[index] ?? []
+    const totals = nodeSeries.reduce(
+      (summary, item, sampleIndex) => {
+        const previous = nodeSeries[sampleIndex - 1]
+        summary.totalRx += Math.max(0, item.total_rx - (previous?.total_rx ?? 0))
+        summary.totalTx += Math.max(0, item.total_tx - (previous?.total_tx ?? 0))
+        return summary
+      },
+      { totalRx: 0, totalTx: 0 },
+    )
+
+    return {
+      id: node.id,
+      name: node.name,
+      host: node.host,
+      currentNode: node.current_node === 1,
+      onlineCount: getMockOnlineClients(node.id).length,
+      userCount: users.filter((user) => user.node_id === node.id).length,
+      totalRx: totals.totalRx,
+      totalTx: totals.totalTx,
+      recordedAt: `2026-06-04 ${String(samples - 1).padStart(2, '0')}:00:00`,
+    }
+  })
 
   const safePage = Math.max(1, page)
   const safePageSize = Math.max(1, pageSize)
