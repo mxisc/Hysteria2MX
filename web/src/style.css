@@ -2068,8 +2068,7 @@ button {
   font-size: 16px;
 }
 
-.traffic-node-head p,
-.traffic-node-foot {
+.traffic-node-head p {
   margin: 0;
   color: #94a3b8;
   font-size: 12px;

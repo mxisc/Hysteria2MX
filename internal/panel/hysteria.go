@@ -866,7 +866,19 @@ func (s *hysteriaService) getTrafficOverview(ctx context.Context, hours int, pag
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			n.id, n.name, n.host, n.current_node,
-			monthly.total_rx, monthly.total_tx, latest.user_count, latest.online_count, latest.recorded_at
+			COALESCE((
+				SELECT SUM(h.delta_rx)
+				FROM node_traffic_history h
+				WHERE h.node_id = n.id
+				  AND h.recorded_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+			), 0) AS total_rx,
+			COALESCE((
+				SELECT SUM(h.delta_tx)
+				FROM node_traffic_history h
+				WHERE h.node_id = n.id
+				  AND h.recorded_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+			), 0) AS total_tx,
+			latest.user_count, latest.online_count, latest.recorded_at
 		FROM server_nodes n
 		LEFT JOIN (
 			SELECT h.node_id, h.user_count, h.online_count, h.recorded_at
@@ -877,34 +889,13 @@ func (s *hysteriaService) getTrafficOverview(ctx context.Context, hours int, pag
 				GROUP BY node_id
 			) grouped ON grouped.node_id = h.node_id AND grouped.max_recorded_at = h.recorded_at
 		) latest ON latest.node_id = n.id
-		LEFT JOIN (
-			SELECT
-				latest_in_range.node_id,
-				GREATEST(latest_in_range.total_rx - earliest_in_range.total_rx, 0) AS total_rx,
-				GREATEST(latest_in_range.total_tx - earliest_in_range.total_tx, 0) AS total_tx
-			FROM (
-				SELECT h.node_id, h.total_rx, h.total_tx, h.recorded_at
-				FROM node_traffic_history h
-				INNER JOIN (
-					SELECT node_id, MAX(recorded_at) AS max_recorded_at
-					FROM node_traffic_history
-					WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-					GROUP BY node_id
-				) grouped ON grouped.node_id = h.node_id AND grouped.max_recorded_at = h.recorded_at
-			) latest_in_range
-			INNER JOIN (
-				SELECT h.node_id, h.total_rx, h.total_tx, h.recorded_at
-				FROM node_traffic_history h
-				INNER JOIN (
-					SELECT node_id, MIN(recorded_at) AS min_recorded_at
-					FROM node_traffic_history
-					WHERE recorded_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
-					GROUP BY node_id
-				) grouped ON grouped.node_id = h.node_id AND grouped.min_recorded_at = h.recorded_at
-			) earliest_in_range ON earliest_in_range.node_id = latest_in_range.node_id
-		) monthly ON monthly.node_id = n.id
 		ORDER BY n.current_node DESC, n.updated_at DESC, n.id DESC
-		LIMIT ? OFFSET ?`, trafficSummaryWindowDays, trafficSummaryWindowDays, pageSize, offset)
+		LIMIT ? OFFSET ?`,
+		trafficSummaryWindowDays,
+		trafficSummaryWindowDays,
+		pageSize,
+		offset,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -2094,8 +2085,14 @@ func (s *hysteriaService) recordTrafficSnapshot(ctx context.Context, nodeID int6
 	if s.shouldUseAgent(*node) && s.agents != nil {
 		agent, agentErr := s.agents.getAgentRecordByNodeID(ctx, node.ID)
 		if agentErr == nil && agent != nil {
-			_, _ = s.db.ExecContext(ctx, `INSERT INTO node_traffic_history (node_id, total_rx, total_tx, user_count, online_count) VALUES (?, ?, ?, ?, ?)`,
-				node.ID, int64Value(agent["last_total_rx"]), int64Value(agent["last_total_tx"]), intValue(agent["last_user_count"]), intValue(agent["last_online_count"]))
+			_ = s.insertTrafficSnapshot(
+				ctx,
+				node.ID,
+				int64Value(agent["last_total_rx"]),
+				int64Value(agent["last_total_tx"]),
+				intValue(agent["last_user_count"]),
+				intValue(agent["last_online_count"]),
+			)
 		}
 		return nil
 	}
@@ -2120,9 +2117,60 @@ func (s *hysteriaService) recordTrafficSnapshot(ctx context.Context, nodeID int6
 		userCount++
 	}
 	onlineCount := len(mapValue(onlineResult["payload"]))
-	_, _ = s.db.ExecContext(ctx, `INSERT INTO node_traffic_history (node_id, total_rx, total_tx, user_count, online_count) VALUES (?, ?, ?, ?, ?)`,
-		node.ID, totalRx, totalTx, userCount, onlineCount)
+	_ = s.insertTrafficSnapshot(ctx, node.ID, totalRx, totalTx, userCount, onlineCount)
 	return nil
+}
+
+func (s *hysteriaService) insertTrafficSnapshot(ctx context.Context, nodeID int64, totalRx int64, totalTx int64, userCount int, onlineCount int) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+
+	previousRx, previousTx, hasPrevious, err := s.getLatestTrafficSnapshotTotals(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+
+	deltaRx := computeTrafficDelta(totalRx, previousRx, hasPrevious)
+	deltaTx := computeTrafficDelta(totalTx, previousTx, hasPrevious)
+
+	_, err = s.db.ExecContext(
+		ctx,
+		`INSERT INTO node_traffic_history (node_id, total_rx, total_tx, delta_rx, delta_tx, user_count, online_count) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		nodeID,
+		totalRx,
+		totalTx,
+		deltaRx,
+		deltaTx,
+		userCount,
+		onlineCount,
+	)
+	return err
+}
+
+func (s *hysteriaService) getLatestTrafficSnapshotTotals(ctx context.Context, nodeID int64) (int64, int64, bool, error) {
+	if s == nil || s.db == nil {
+		return 0, 0, false, nil
+	}
+
+	var totalRx int64
+	var totalTx int64
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT total_rx, total_tx
+		FROM node_traffic_history
+		WHERE node_id = ?
+		ORDER BY recorded_at DESC, id DESC
+		LIMIT 1`,
+		nodeID,
+	).Scan(&totalRx, &totalTx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, 0, false, nil
+		}
+		return 0, 0, false, err
+	}
+	return totalRx, totalTx, true, nil
 }
 
 func (s *hysteriaService) runSSHServiceAction(node nodeRecord, action string) (map[string]any, error) {
@@ -2731,6 +2779,19 @@ func nullInt64(value sql.NullInt64) int64 {
 		return 0
 	}
 	return value.Int64
+}
+
+func computeTrafficDelta(current int64, previous int64, hasPrevious bool) int64 {
+	if current < 0 {
+		current = 0
+	}
+	if !hasPrevious {
+		return 0
+	}
+	if current >= previous {
+		return current - previous
+	}
+	return current
 }
 
 func toString(value any) string {

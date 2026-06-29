@@ -994,12 +994,6 @@ function resizeTrafficChart() {
   }
 }
 
-function formatTrafficRecordedAt(value: string): string {
-  if (!value) return '暂无采样'
-  const date = new Date(value)
-  return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
-}
-
 function formatChartBytes(val: number): string {
   if (val < 1024) return Math.round(val) + ' B'
   if (val < 1024 * 1024) return Math.round(val / 1024) + ' KB'
@@ -2456,7 +2450,6 @@ async function handleSendTestNotification() {
                 </div>
               </div>
 
-              <p class="traffic-node-foot">最近采样：{{ formatTrafficRecordedAt(item.recordedAt) }}</p>
             </article>
           </div>
           <div v-if="trafficPagination.total > 0" class="audit-pagination">
