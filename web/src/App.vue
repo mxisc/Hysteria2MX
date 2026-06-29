@@ -190,7 +190,7 @@ function createEmptyNodeForm(): HysteriaNodePayload {
     bandwidth_down_mbps: 200,
     manage_mode: 'agent',
     agent_enabled: true,
-    agent_report_interval_seconds: 5,
+    agent_report_interval_seconds: 2,
     agent_task_poll_interval_seconds: 1,
     agent_install_path: '/usr/local/bin/mxinhy-agent',
     agent_config_path: '/etc/mxinhy-agent.json',
@@ -784,7 +784,7 @@ function startUserTrafficStatsAutoRefresh() {
 
   userTrafficStatsTimer = window.setInterval(() => {
     void loadUserTrafficStats()
-  }, 5000)
+  }, 2000)
 }
 
 async function loadUserTrafficStats() {
@@ -802,9 +802,7 @@ async function loadUserTrafficStats() {
     userTrafficStats.value = stats
     updateUserTrafficRates(stats)
   } catch {
-    userTrafficStats.value = []
-    previousUserTrafficSnapshot = null
-    userTrafficRates.value = {}
+    // Keep the last visible rate on transient cache/API failures.
   }
 }
 
@@ -1481,7 +1479,7 @@ async function setSection(id: SectionId) {
     }
     startUserTrafficStatsAutoRefresh()
   } else {
-    stopUserTrafficStatsTimer()
+    stopUserTrafficStatsTimer(false)
   }
 
   if (id === 'nodes' && session.value) {

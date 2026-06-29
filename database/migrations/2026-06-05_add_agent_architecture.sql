@@ -46,7 +46,7 @@ SET @sql := IF(
           AND COLUMN_NAME = 'agent_report_interval_seconds'
     ),
     'SELECT 1',
-    'ALTER TABLE server_nodes ADD COLUMN agent_report_interval_seconds INT NOT NULL DEFAULT 5 AFTER agent_enabled'
+    'ALTER TABLE server_nodes ADD COLUMN agent_report_interval_seconds INT NOT NULL DEFAULT 2 AFTER agent_enabled'
 );
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS node_agents (
     status ENUM('pending', 'online', 'offline', 'error') NOT NULL DEFAULT 'pending',
     version VARCHAR(32) NOT NULL DEFAULT '',
     capabilities_json JSON NULL,
-    report_interval_seconds INT NOT NULL DEFAULT 5,
+    report_interval_seconds INT NOT NULL DEFAULT 2,
     task_poll_interval_seconds INT NOT NULL DEFAULT 1,
     installed_at DATETIME NULL,
     last_seen_at DATETIME NULL,
