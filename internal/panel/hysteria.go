@@ -760,20 +760,13 @@ func (s *hysteriaService) getRealtimeTrafficStats(ctx context.Context, nodeID in
 	}
 
 	if s.shouldUseAgent(*node) {
-		result, err := s.runAgentTask(ctx, *node, opcodeFetchUserTraffic, map[string]any{"usernames": usernames}, 20)
+		items, err := s.getCachedAgentUserTrafficStats(ctx, node.ID, usernames)
 		if err != nil {
 			return nil, err
 		}
-		itemsRaw, _ := mapValue(result["payload"])["items"].([]any)
-		items := make([]map[string]any, 0, len(itemsRaw))
-		for _, item := range itemsRaw {
-			if row, ok := item.(map[string]any); ok {
-				items = append(items, row)
-			}
-		}
 		response := s.sliceListResponse(items, page, pageSize)
-		response["exitCode"] = intValue(result["exitCode"])
-		response["output"] = toString(result["output"])
+		response["exitCode"] = 0
+		response["output"] = ""
 		return response, nil
 	}
 
@@ -781,7 +774,26 @@ func (s *hysteriaService) getRealtimeTrafficStats(ctx context.Context, nodeID in
 	if err != nil {
 		return nil, err
 	}
-	payload := mapValue(result["payload"])
+	items := buildUserTrafficStatsItems(node.ID, mapValue(result["payload"]), usernames)
+	response := s.sliceListResponse(items, page, pageSize)
+	response["exitCode"] = 0
+	response["output"] = ""
+	return response, nil
+}
+
+func (s *hysteriaService) getCachedAgentUserTrafficStats(ctx context.Context, nodeID int64, usernames []string) ([]map[string]any, error) {
+	if s.agents == nil {
+		return []map[string]any{}, nil
+	}
+	agent, err := s.agents.getAgentRecordByNodeID(ctx, nodeID)
+	if err != nil || agent == nil {
+		return []map[string]any{}, err
+	}
+	payload := mapValue(agent["last_payload_json"])
+	return buildUserTrafficStatsItems(nodeID, mapValue(payload["user_traffic"]), usernames), nil
+}
+
+func buildUserTrafficStatsItems(nodeID int64, payload map[string]any, usernames []string) []map[string]any {
 	allowed := make(map[string]bool)
 	for _, item := range usernames {
 		item = strings.TrimSpace(item)
@@ -801,6 +813,7 @@ func (s *hysteriaService) getRealtimeTrafficStats(ctx context.Context, nodeID in
 		rx := int64Value(stats["rx"])
 		tx := int64Value(stats["tx"])
 		items = append(items, map[string]any{
+			"node_id":     nodeID,
 			"username":    username,
 			"rx":          rx,
 			"tx":          tx,
@@ -817,10 +830,7 @@ func (s *hysteriaService) getRealtimeTrafficStats(ctx context.Context, nodeID in
 		}
 		return toString(items[i]["username"]) < toString(items[j]["username"])
 	})
-	response := s.sliceListResponse(items, page, pageSize)
-	response["exitCode"] = 0
-	response["output"] = ""
-	return response, nil
+	return items
 }
 
 func (s *hysteriaService) getTrafficOverview(ctx context.Context, hours int, page int, pageSize int) (map[string]any, error) {

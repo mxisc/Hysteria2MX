@@ -116,6 +116,14 @@ type AdminEditorForm = {
 type SetupEditorForm = SetupPayload
 
 type ToastType = 'success' | 'error' | 'info'
+type UserTrafficRate = {
+  rxMbps: number | null
+  txMbps: number | null
+}
+type UserTrafficSnapshot = {
+  capturedAt: number
+  stats: Record<string, { rx: number, tx: number }>
+}
 
 const NODE_STATUS_SYNC_INTERVAL_MS = 60 * 1000
 
@@ -458,6 +466,7 @@ const notificationSettingsLoaded = ref(false)
 const onlineClientTotal = ref(0)
 const streamTotal = ref(0)
 const userTrafficStats = ref<UserTrafficStats[]>([])
+const userTrafficRates = ref<Record<string, UserTrafficRate>>({})
 const trafficHistory = ref<NodeTrafficHistoryItem[]>([])
 const trafficNodeSummaries = ref<TrafficNodeSummary[]>([])
 const trafficHistoryLoaded = ref(false)
@@ -504,6 +513,7 @@ let userFilterTimer: number | null = null
 let toastTimer: number | null = null
 let nodeStatusSyncTimer: number | null = null
 let userTrafficStatsTimer: number | null = null
+let previousUserTrafficSnapshot: UserTrafficSnapshot | null = null
 let trafficChart: ECharts | null = null
 
 const loginForm = ref({
@@ -633,13 +643,15 @@ const appearanceSecuritySummary = computed(() => {
 const userTrafficStatsMap = computed(() => {
   const map: Record<string, UserTrafficStats> = {}
   for (const stat of userTrafficStats.value) {
-    map[stat.username] = stat
+    map[userTrafficKey(stat.node_id, stat.username)] = stat
   }
   return map
 })
 
+const userTrafficRateMap = computed(() => userTrafficRates.value)
+
 const filteredRealtimeUsers = computed(() => {
-  return filteredUsers.value.filter((user) => Boolean(userTrafficStatsMap.value[user.username])).length
+  return filteredUsers.value.filter((user) => Boolean(userTrafficStatsMap.value[userTrafficKey(user.node_id, user.username)])).length
 })
 
 const aggregatedTrafficSeries = computed(() => {
@@ -754,15 +766,18 @@ function stopAuditLogAutoRefreshTimer() {
   }
 }
 
-function stopUserTrafficStatsTimer() {
+function stopUserTrafficStatsTimer(resetSnapshot = true) {
   if (userTrafficStatsTimer !== null) {
     window.clearInterval(userTrafficStatsTimer)
     userTrafficStatsTimer = null
   }
+  if (!resetSnapshot) return
+  previousUserTrafficSnapshot = null
+  userTrafficRates.value = {}
 }
 
 function startUserTrafficStatsAutoRefresh() {
-  stopUserTrafficStatsTimer()
+  stopUserTrafficStatsTimer(false)
   if (!session.value || currentSection.value !== 'users' || !hasPermission('user.view')) {
     return
   }
@@ -775,16 +790,53 @@ function startUserTrafficStatsAutoRefresh() {
 async function loadUserTrafficStats() {
   if (!panel.value.currentNodeId || !hasPermission('user.view') || !users.value.length) {
     userTrafficStats.value = []
+    previousUserTrafficSnapshot = null
+    userTrafficRates.value = {}
     return
   }
   try {
-    userTrafficStats.value = await fetchUserTrafficStats(
+    const stats = await fetchUserTrafficStats(
       panel.value.currentNodeId,
-      users.value.map((user) => user.username),
+      users.value.filter((user) => user.node_id === panel.value.currentNodeId).map((user) => user.username),
     )
+    userTrafficStats.value = stats
+    updateUserTrafficRates(stats)
   } catch {
     userTrafficStats.value = []
+    previousUserTrafficSnapshot = null
+    userTrafficRates.value = {}
   }
+}
+
+function updateUserTrafficRates(stats: UserTrafficStats[]) {
+  const capturedAt = Date.now()
+  const nextSnapshot: UserTrafficSnapshot = {
+    capturedAt,
+    stats: {},
+  }
+  const nextRates: Record<string, UserTrafficRate> = {}
+  const elapsedSeconds = previousUserTrafficSnapshot ? (capturedAt - previousUserTrafficSnapshot.capturedAt) / 1000 : 0
+
+  for (const stat of stats) {
+    const rx = Number(stat.rx || 0)
+    const tx = Number(stat.tx || 0)
+    const key = userTrafficKey(stat.node_id, stat.username)
+    nextSnapshot.stats[key] = { rx, tx }
+
+    const previous = previousUserTrafficSnapshot?.stats[key]
+    if (!previous || elapsedSeconds <= 0 || rx < previous.rx || tx < previous.tx) {
+      nextRates[key] = { rxMbps: null, txMbps: null }
+      continue
+    }
+
+    nextRates[key] = {
+      rxMbps: bytesPerSecondToMbps((rx - previous.rx) / elapsedSeconds),
+      txMbps: bytesPerSecondToMbps((tx - previous.tx) / elapsedSeconds),
+    }
+  }
+
+  previousUserTrafficSnapshot = nextSnapshot
+  userTrafficRates.value = nextRates
 }
 
 async function loadTrafficHistory(page = trafficPage.value) {
@@ -999,6 +1051,20 @@ function formatChartBytes(val: number): string {
   if (val < 1024 * 1024) return Math.round(val / 1024) + ' KB'
   if (val < 1024 * 1024 * 1024) return (val / 1024 / 1024).toFixed(1) + ' MB'
   return (val / 1024 / 1024 / 1024).toFixed(1) + ' GB'
+}
+
+function bytesPerSecondToMbps(bytesPerSecond: number): number {
+  return (bytesPerSecond * 8) / 1000 / 1000
+}
+
+function formatMbps(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '--'
+  if (value < 100) return `${value.toFixed(2)} Mbps`
+  return `${value.toFixed(1)} Mbps`
+}
+
+function userTrafficKey(nodeId: number | null | undefined, username: string): string {
+  return `${nodeId ?? 0}:${username}`
 }
 
 function resolveUserQuotaPercent(user: HysteriaUser): number {
@@ -2614,7 +2680,7 @@ async function handleSendTestNotification() {
                 <span>到期时间</span>
                 <span>限速</span>
                 <span>流量进度</span>
-                <span>实时流量</span>
+                <span>实时速率</span>
                 <span>操作</span>
               </div>
               <article v-for="user in filteredUsers" :key="user.id" class="user-list-row">
@@ -2635,10 +2701,10 @@ async function handleSendTestNotification() {
                     <div class="traffic-bar" :style="{ width: resolveUserQuotaPercent(user) + '%' }"></div>
                   </div>
                 </span>
-                <span class="user-list-cell user-list-realtime" data-label="实时流量">
-                  <template v-if="userTrafficStatsMap[user.username]">
-                    <span class="traffic-realtime-item" title="下行">↓ {{ userTrafficStatsMap[user.username].rx_human }}</span>
-                    <span class="traffic-realtime-item" title="上行">↑ {{ userTrafficStatsMap[user.username].tx_human }}</span>
+                <span class="user-list-cell user-list-realtime" data-label="实时速率">
+                  <template v-if="userTrafficStatsMap[userTrafficKey(user.node_id, user.username)]">
+                    <span class="traffic-realtime-item" title="下行">↓ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.rxMbps) }}</span>
+                    <span class="traffic-realtime-item" title="上行">↑ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.txMbps) }}</span>
                   </template>
                   <span v-else class="traffic-text">--</span>
                 </span>
