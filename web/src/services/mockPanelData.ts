@@ -288,16 +288,31 @@ export function getMockTrafficHistory(hours = 24, page = 1, pageSize = 12): Traf
 
 export function getMockAuditLogs(nodeId?: number | null): AuditLogItem[] {
   const nodes = getMockNodes()
-  const actions = ['node.update', 'user.create', 'hysteria.service.restart', 'system_settings.update', 'notification_settings.test']
+  const actions = [
+    'node.update',
+    'user.create',
+    'hysteria.service.restart',
+    'system_settings.update',
+    'notification_settings.test',
+    'node.create',
+    'user.update',
+    'hysteria.deploy_config',
+    'hysteria.sync_traffic',
+    'admin.update',
+    'notification_settings.update',
+    'user.delete',
+    'hysteria.service.start',
+  ]
   const targetNodes = nodeId ? nodes.filter((node) => node.id === nodeId) : nodes
   return Array.from({ length: 86 }, (_, index) => {
     const node = targetNodes[index % targetNodes.length] ?? nodes[0]
+    const action = actions[(index * 7 + Math.floor(index / 3)) % actions.length]
     return {
       id: 5000 + index,
       admin_id: 1,
       admin_username: 'admin',
       admin_display_name: '系统管理员',
-      action: actions[index % actions.length],
+      action,
       target_type: index % 2 === 0 ? 'node' : 'system',
       target_id: String(node.id),
       ip_address: '203.0.113.10',
@@ -368,25 +383,41 @@ function buildMockNodes(config: MockPanelConfig): HysteriaNodeConfig[] {
 }
 
 function buildMockUsers(config: MockPanelConfig, nodes: HysteriaNodeConfig[]): HysteriaUser[] {
-  return Array.from({ length: config.user_count }, (_, index) => {
-    const node = nodes[index % nodes.length]
-    const quota = [80, 120, 200, 300][index % 4]
-    const used = Math.round(quota * (0.18 + (index % 7) * 0.09))
-    return {
-      id: 2000 + index,
-      public_id: `usr_mock_${String(index + 1).padStart(4, '0')}`,
-      node_id: node.id,
-      username: `user${String(index + 1).padStart(3, '0')}`,
-      auth_password: `mock-pass-${index + 1}`,
-      status: index < config.suspended_user_count ? 'suspended' : 'active',
-      quota_gb: quota,
-      used_gb: Math.min(used, quota),
-      speed_limit_mbps: [50, 80, 120, 200][index % 4],
-      expires_at: index % 5 === 0 ? null : `2026-0${(index % 6) + 1}-28 23:59:59`,
-      created_at: nowText,
-      updated_at: nowText,
+  if (!nodes.length || config.user_count <= 0) {
+    return []
+  }
+
+  const items: HysteriaUser[] = []
+  const logicalUserCount = Math.max(1, Math.ceil(config.user_count / 2))
+
+  for (let logicalIndex = 0; logicalIndex < logicalUserCount && items.length < config.user_count; logicalIndex += 1) {
+    const username = `user${String(logicalIndex + 1).padStart(3, '0')}`
+    const copies = 1 + (logicalIndex % Math.min(3, nodes.length))
+
+    for (let copyIndex = 0; copyIndex < copies && items.length < config.user_count; copyIndex += 1) {
+      const recordIndex = items.length
+      const node = nodes[(logicalIndex + copyIndex) % nodes.length]
+      const quota = [80, 120, 200, 300][recordIndex % 4]
+      const used = Math.round(quota * (0.18 + (recordIndex % 7) * 0.09))
+
+      items.push({
+        id: 2000 + recordIndex,
+        public_id: `usr_mock_${String(recordIndex + 1).padStart(4, '0')}`,
+        node_id: node.id,
+        username,
+        auth_password: `mock-pass-${logicalIndex + 1}`,
+        status: recordIndex < config.suspended_user_count ? 'suspended' : 'active',
+        quota_gb: quota,
+        used_gb: Math.min(used, quota),
+        speed_limit_mbps: [50, 80, 120, 200][recordIndex % 4],
+        expires_at: recordIndex % 5 === 0 ? null : `2026-0${(recordIndex % 6) + 1}-28 23:59:59`,
+        created_at: nowText,
+        updated_at: nowText,
+      })
     }
-  })
+  }
+
+  return items
 }
 
 function buildNodeStatuses(config: MockPanelConfig): ServiceStatus[] {

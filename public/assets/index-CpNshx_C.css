@@ -549,7 +549,7 @@ button {
   gap: 18px;
   height: 100vh;
   min-height: 0;
-  padding: 32px 24px;
+  padding: 32px 24px 30px;
   border-right: 1px solid var(--panel-border);
   background: rgba(11, 17, 28, 0.96);
   backdrop-filter: blur(14px);
@@ -563,9 +563,7 @@ button {
 }
 
 .sidebar-copy,
-.hero-copy,
 .listener-row p,
-.helper-text,
 .table-row small,
 .meta-label,
 .service-grid p {
@@ -1221,7 +1219,7 @@ button {
 
 .user-list-table {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   margin-top: 18px;
 }
 
@@ -1229,12 +1227,11 @@ button {
 .user-list-row {
   display: grid;
   grid-template-columns:
-    minmax(128px, 1fr)
-    88px
-    minmax(132px, 0.95fr)
-    92px
-    minmax(190px, 1.3fr)
-    minmax(110px, 0.85fr)
+    minmax(148px, 1fr)
+    minmax(150px, 0.95fr)
+    minmax(220px, 1.4fr)
+    minmax(100px, 0.8fr)
+    minmax(120px, 0.9fr)
     minmax(220px, 1.3fr);
   gap: 10px;
   align-items: center;
@@ -1255,6 +1252,17 @@ button {
   background: var(--panel-bg-soft);
 }
 
+.logical-user-row {
+  position: relative;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.logical-user-row:hover {
+  border-color: var(--accent-border);
+  background: rgba(18, 29, 45, 0.92);
+}
+
 .user-list-cell {
   min-width: 0;
 }
@@ -1264,6 +1272,12 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.user-list-name small,
+.user-list-node-tags {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .user-list-status .user-status {
@@ -1279,13 +1293,6 @@ button {
   display: flex;
   gap: 8px;
   align-items: center;
-  justify-content: space-between;
-}
-
-.user-list-traffic-top strong {
-  font-size: 12px;
-  color: #e2e8f0;
-  white-space: nowrap;
 }
 
 .user-list-traffic-bar {
@@ -1308,6 +1315,94 @@ button {
 .user-list-actions .compact-button {
   padding: 7px 10px;
   font-size: 13px;
+}
+
+.user-detail-list {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  margin: -2px 0 8px;
+  padding: 10px 0 4px;
+}
+
+.user-detail-list::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 8px;
+  bottom: 10px;
+  width: 1px;
+  background: linear-gradient(180deg, var(--accent-border), rgba(148, 163, 184, 0.04));
+}
+
+.user-detail-row {
+  --user-detail-action-gap: 110px;
+  position: relative;
+  display: grid;
+  grid-template-columns:
+    minmax(148px, 1fr)
+    minmax(150px, 0.95fr)
+    minmax(220px, 1.4fr)
+    minmax(100px, 0.8fr)
+    minmax(120px, 0.9fr)
+    minmax(220px, 1.3fr);
+  gap: 10px;
+  align-items: center;
+  padding: 12px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 12px;
+  background: rgba(11, 17, 28, 0.56);
+}
+
+.user-detail-row::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  width: 12px;
+  height: 1px;
+  background: var(--accent-border);
+}
+
+.user-detail-row:hover {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 36, 0.72);
+}
+
+.user-detail-row .user-list-name {
+  grid-column: 1 / span 2;
+  padding-left: 18px;
+}
+
+.user-detail-row .user-list-name strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.user-detail-row .user-list-traffic {
+  grid-column: 3 / -1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.user-detail-row .user-list-traffic-top {
+  gap: 6px 12px;
+}
+
+.user-detail-row .traffic-text {
+  color: #a8b5c7;
+}
+
+.user-detail-row .traffic-bar-wrap {
+  width: calc(100% - var(--user-detail-action-gap));
+  max-width: none;
+  height: 6px;
+  background: rgba(71, 85, 105, 0.34);
+}
+
+.user-detail-row .traffic-realtime-item {
+  font-size: 11px;
 }
 
 .traffic-realtime-item {
@@ -1452,8 +1547,8 @@ button {
 
 .background-config-grid {
   display: grid;
-  gap: 18px;
-  margin-top: 20px;
+  gap: 14px;
+  margin-top: 18px;
 }
 
 .config-field {
@@ -1483,7 +1578,7 @@ button {
   width: 100%;
   color: #e2e8f0;
   border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 16px;
+  border-radius: 12px;
   background: rgba(8, 17, 32, 0.85);
 }
 
@@ -1494,20 +1589,8 @@ button {
 }
 
 .background-select {
-  min-height: 48px;
+  min-height: 44px;
   padding: 0 14px;
-}
-
-.tip-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 18px;
-  color: #94a3b8;
-  font-size: 14px;
-}
-
-.tip-list p {
-  margin: 0;
 }
 
 .login-background-preview {
@@ -1542,32 +1625,33 @@ button {
 }
 
 .appearance-stack {
-  gap: 20px;
+  gap: 16px;
 }
 
 .appearance-hero-card {
   align-items: center;
+  min-height: auto;
+  padding: 20px 22px;
 }
 
 .appearance-hero-pills {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  width: min(520px, 100%);
+  gap: 10px;
+  width: min(560px, 100%);
 }
 
 .appearance-pill {
   display: grid;
-  gap: 6px;
-  padding: 16px 18px;
+  gap: 5px;
+  padding: 12px 14px;
   border: 1px solid rgba(148, 163, 184, 0.14);
-  border-radius: 18px;
-  background: rgba(8, 17, 32, 0.52);
+  border-radius: 12px;
+  background: rgba(8, 17, 32, 0.58);
 }
 
 .appearance-pill span,
-.appearance-status-item small,
-.appearance-card-copy {
+.appearance-status-item small {
   color: #94a3b8;
 }
 
@@ -1582,21 +1666,30 @@ button {
   word-break: break-word;
 }
 
-.appearance-card-copy {
-  margin: 8px 0 0;
-}
-
 .appearance-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
-  gap: 20px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 16px;
   align-items: start;
 }
 
 .appearance-main,
 .appearance-side {
   display: grid;
-  gap: 20px;
+  gap: 16px;
+}
+
+.appearance-config-card,
+.mail-config-card {
+  padding: 20px;
+  border-color: rgba(148, 163, 184, 0.13);
+  background: rgba(11, 17, 28, 0.74);
+}
+
+.appearance-config-card .section-head,
+.mail-config-card .section-head {
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
 }
 
 .appearance-form-grid {
@@ -1604,9 +1697,9 @@ button {
 }
 
 .appearance-toggle-field {
-  padding: 14px 16px;
+  padding: 12px 14px;
   border: 1px solid rgba(148, 163, 184, 0.14);
-  border-radius: 18px;
+  border-radius: 12px;
   background: rgba(8, 17, 32, 0.42);
 }
 
@@ -1616,11 +1709,13 @@ button {
 }
 
 .appearance-login-preview {
-  min-height: 420px;
+  min-height: 320px;
+  border-radius: 16px;
 }
 
 .appearance-preview-login-card {
   width: min(100%, 300px);
+  border-radius: 14px;
 }
 
 .appearance-preview-brand {
@@ -1640,17 +1735,17 @@ button {
 
 .appearance-status-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 20px;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 .appearance-status-item {
   display: grid;
-  gap: 8px;
-  padding: 16px;
+  gap: 6px;
+  padding: 13px 14px;
   border: 1px solid rgba(148, 163, 184, 0.12);
-  border-radius: 18px;
+  border-radius: 12px;
   background: rgba(8, 17, 32, 0.62);
 }
 
@@ -1666,15 +1761,6 @@ button {
 
 .success-text {
   margin-bottom: 0;
-}
-
-.check-list {
-  padding-left: 18px;
-  color: #cbd5e1;
-}
-
-.check-list li + li {
-  margin-top: 12px;
 }
 
 .log-row {
@@ -1719,7 +1805,8 @@ button {
   .two-column,
   .service-grid,
   .appearance-layout,
-  .appearance-hero-pills {
+  .appearance-hero-pills,
+  .mail-notification-grid {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -1776,6 +1863,8 @@ button {
   .appearance-form-grid,
   .appearance-hero-pills,
   .appearance-status-grid,
+  .mail-notification-grid,
+  .mail-config-card:nth-child(2) .mail-fields-grid,
   .table-head,
   .table-row {
     grid-template-columns: 1fr;
@@ -1795,6 +1884,11 @@ button {
   .appearance-preview-brand {
     grid-template-columns: 1fr;
     justify-items: start;
+  }
+
+  .mail-status-toggle {
+    justify-content: center;
+    width: 100%;
   }
 
   .table-head {
@@ -2032,6 +2126,8 @@ button {
 
 .logs-audit-stack {
   gap: 14px;
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .logs-filter-card {
@@ -2094,11 +2190,30 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+  min-height: 0;
 }
 
 .logs-panel-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.logs-panel-card .section-head {
+  align-self: start;
+}
+
+.logs-panel-card .large-terminal,
+.logs-panel-card .audit-records-panel,
+.logs-panel-card .empty-card {
+  min-height: 0;
+}
+
+.logs-panel-card .large-terminal {
+  max-height: none;
 }
 
 .traffic-chart-container {
@@ -2207,11 +2322,26 @@ button {
 
 .audit-preview-list {
   display: grid;
+  align-content: start;
   gap: 10px;
   margin-top: 16px;
   max-height: 340px;
   overflow: auto;
   padding-right: 4px;
+}
+
+.audit-records-panel {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  margin-top: 20px;
+}
+
+.audit-records-panel .audit-preview-list {
+  min-height: 0;
+  height: 100%;
+  max-height: none;
+  margin-top: 0;
 }
 
 .audit-preview-list,
@@ -2275,19 +2405,37 @@ button {
   background: rgba(15, 23, 42, 0.78);
 }
 
+.mail-stack {
+  align-content: start;
+  gap: 16px;
+}
+
 .mail-hero-card {
   align-items: center;
+  min-height: auto;
+  padding: 20px 22px;
 }
 
-.mail-status-pill {
-  padding: 8px 12px;
+.mail-status-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 0 12px;
   border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 999px;
+  border-radius: 12px;
   color: #94a3b8;
   background: rgba(15, 23, 42, 0.62);
+  cursor: pointer;
 }
 
-.mail-status-pill.active {
+.mail-status-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #22c55e;
+}
+
+.mail-status-toggle.active {
   color: #bbf7d0;
   border-color: rgba(34, 197, 94, 0.36);
   background: rgba(22, 101, 52, 0.28);
@@ -2295,38 +2443,45 @@ button {
 
 .mail-notification-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1fr) minmax(0, 1.25fr);
+  grid-template-columns: minmax(280px, 0.7fr) minmax(0, 1.3fr);
   gap: 16px;
   align-items: start;
 }
 
 .mail-config-card {
-  min-height: 100%;
-}
-
-.mail-enable-card {
   display: grid;
   align-content: start;
-  gap: 12px;
+  min-height: 100%;
 }
 
 .mail-fields-grid {
   gap: 14px;
 }
 
-.mail-tip-card {
-  padding: 16px 20px;
+.mail-config-card:first-child .mail-fields-grid {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.mail-tip-card .tip-list {
-  margin-top: 0;
+.mail-config-card:nth-child(2) .mail-fields-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .audit-preview-row {
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(130px, 0.9fr) minmax(110px, 0.75fr) minmax(150px, 1fr);
+  gap: 12px;
+  align-items: center;
+  justify-items: start;
   padding: 14px 16px;
   border-radius: 16px;
   background: rgba(8, 17, 32, 0.76);
+  text-align: left;
+}
+
+.audit-preview-row strong,
+.audit-preview-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .qr-modal-card {
@@ -2349,9 +2504,13 @@ button {
 }
 
 .qr-link-box {
-  min-height: 120px;
+  min-height: 0;
+  height: 84px;
   width: 100%;
+  padding: 8px 10px;
+  box-sizing: border-box;
   margin-top: 0;
+  resize: none;
 }
 
 @media (max-width: 1180px) {
@@ -2371,11 +2530,21 @@ button {
   .user-list-head,
   .user-list-row {
     grid-template-columns:
-      minmax(128px, 1fr)
-      88px
-      minmax(132px, 0.95fr)
-      92px
-      minmax(170px, 1.15fr)
+      minmax(148px, 1fr)
+      minmax(140px, 0.9fr)
+      minmax(180px, 1.1fr)
+      minmax(92px, 0.75fr)
+      minmax(100px, 0.8fr)
+      minmax(180px, 1.1fr);
+  }
+
+  .user-detail-row {
+    --user-detail-action-gap: 0px;
+    grid-template-columns:
+      minmax(148px, 1fr)
+      minmax(140px, 0.9fr)
+      minmax(180px, 1.1fr)
+      minmax(92px, 0.75fr)
       minmax(100px, 0.8fr)
       minmax(180px, 1.1fr);
   }
@@ -2412,9 +2581,28 @@ button {
     --node-inline-columns: 1fr;
   }
 
-  .user-list-row {
+  .user-list-row,
+  .user-detail-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px 18px;
+  }
+
+  .user-detail-list {
+    margin: 0 0 8px;
+    padding: 0;
+  }
+
+  .user-detail-list::before,
+  .user-detail-row::before {
+    display: none;
+  }
+
+  .user-detail-row {
+    margin-left: 0;
+  }
+
+  .user-detail-row .user-list-name {
+    padding-left: 0;
   }
 
   .user-list-cell {
@@ -2460,7 +2648,8 @@ button {
 }
 
 @media (max-width: 640px) {
-  .user-list-row {
+  .user-list-row,
+  .user-detail-row {
     grid-template-columns: 1fr;
   }
 }

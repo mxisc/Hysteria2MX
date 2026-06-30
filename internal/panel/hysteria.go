@@ -374,21 +374,174 @@ func (s *hysteriaService) listUsersPageForUser(ctx context.Context, user *authUs
 	return paginatedResult(items, page, pageSize, total), nil
 }
 
+func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user *authUser, page int, pageSize int, keyword string, filter string) (map[string]any, error) {
+	page, pageSize, offset := resolvePagination(page, pageSize)
+	keyword = strings.TrimSpace(keyword)
+	filter = strings.TrimSpace(filter)
+
+	where := `WHERE 1=1`
+	args := []any{}
+	if keyword != "" {
+		where += ` AND username LIKE ?`
+		args = append(args, "%"+keyword+"%")
+	}
+
+	abnormalSQL := `(status <> 'active' OR expires_at < NOW() OR (quota_gb > 0 AND used_gb >= quota_gb))`
+	having := ``
+	switch filter {
+	case "abnormal":
+		having = ` HAVING SUM(CASE WHEN ` + abnormalSQL + ` THEN 1 ELSE 0 END) > 0`
+	case "single":
+		having = ` HAVING COUNT(*) = 1`
+	case "multi":
+		having = ` HAVING COUNT(*) > 1`
+	}
+
+	groupedSQL := `
+                SELECT username,
+                       COUNT(*) AS node_count,
+                       SUM(quota_gb) AS quota_gb,
+                       SUM(used_gb) AS used_gb,
+                       SUM(CASE WHEN ` + abnormalSQL + ` THEN 1 ELSE 0 END) AS abnormal_count,
+                       MAX(updated_at) AS last_updated_at
+                FROM hysteria_users ` + where + `
+                GROUP BY username` + having
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+groupedSQL+`) grouped_users`, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	pageArgs := append([]any{}, args...)
+	pageArgs = append(pageArgs, pageSize, offset)
+	rows, err := s.db.QueryContext(ctx, groupedSQL+` ORDER BY last_updated_at DESC LIMIT ? OFFSET ?`, pageArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type groupedUserRow struct {
+		Username      string
+		NodeCount     int
+		QuotaGB       int64
+		UsedGB        int64
+		AbnormalCount int
+	}
+
+	groups := make([]groupedUserRow, 0)
+	usernames := make([]string, 0)
+	for rows.Next() {
+		var item groupedUserRow
+		var lastUpdatedAt time.Time
+		if err := rows.Scan(&item.Username, &item.NodeCount, &item.QuotaGB, &item.UsedGB, &item.AbnormalCount, &lastUpdatedAt); err != nil {
+			return nil, err
+		}
+		groups = append(groups, item)
+		usernames = append(usernames, item.Username)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(groups) == 0 {
+		return paginatedResult([]any{}, page, pageSize, total), nil
+	}
+
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(usernames)), ",")
+	detailArgs := make([]any, 0, len(usernames))
+	for _, username := range usernames {
+		detailArgs = append(detailArgs, username)
+	}
+	detailRows, err := s.db.QueryContext(ctx, `
+                SELECT u.id, u.public_id, u.node_id, u.username, u.auth_password, u.status, u.quota_gb, u.used_gb, u.speed_limit_mbps, u.expires_at, u.created_at, u.updated_at,
+                       COALESCE(n.name, '') AS node_name
+                FROM hysteria_users u
+                LEFT JOIN hysteria_nodes n ON n.id = u.node_id
+                WHERE u.username IN (`+placeholders+`)
+                ORDER BY u.username ASC, n.name ASC, u.id DESC`, detailArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer detailRows.Close()
+
+	detailsByUsername := map[string][]any{}
+	nodesByUsername := map[string][]any{}
+	for detailRows.Next() {
+		var record userRecord
+		var nodeName string
+		if err := detailRows.Scan(
+			&record.ID,
+			&record.PublicID,
+			&record.NodeID,
+			&record.Username,
+			&record.AuthPassword,
+			&record.Status,
+			&record.QuotaGB,
+			&record.UsedGB,
+			&record.SpeedLimitMbps,
+			&record.ExpiresAt,
+			&record.CreatedAt,
+			&record.UpdatedAt,
+			&nodeName,
+		); err != nil {
+			return nil, err
+		}
+		detail, err := s.presentUser(record, s.canViewSensitiveFields(user))
+		if err != nil {
+			return nil, err
+		}
+		detail["node_name"] = nodeName
+		detailsByUsername[record.Username] = append(detailsByUsername[record.Username], detail)
+		nodesByUsername[record.Username] = append(nodesByUsername[record.Username], map[string]any{
+			"id":   record.NodeID,
+			"name": nodeName,
+		})
+	}
+	if err := detailRows.Err(); err != nil {
+		return nil, err
+	}
+
+	items := make([]any, 0, len(groups))
+	for _, group := range groups {
+		status := "normal"
+		if group.AbnormalCount > 0 {
+			status = "partial_abnormal"
+		}
+		items = append(items, map[string]any{
+			"username":       group.Username,
+			"status":         status,
+			"node_count":     group.NodeCount,
+			"quota_gb":       group.QuotaGB,
+			"used_gb":        group.UsedGB,
+			"abnormal_count": group.AbnormalCount,
+			"nodes":          nodesByUsername[group.Username],
+			"details":        detailsByUsername[group.Username],
+		})
+	}
+
+	return paginatedResult(items, page, pageSize, total), nil
+}
+
 func (s *hysteriaService) createUser(ctx context.Context, payload map[string]any) (map[string]any, error) {
 	data, err := s.normalizeUserPayload(payload, nil)
 	if err != nil {
 		return nil, err
 	}
-	nodeID := int64Value(data["node_id"])
-	node, err := s.getStoredNode(ctx, nodeID)
+	nodes, err := s.listStoredNodes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if node == nil {
-		return nil, errors.New("请选择有效节点")
+	if len(nodes) == 0 {
+		return nil, errors.New("请先创建节点")
 	}
-	if err := s.assertUniqueUserCredential(ctx, node.ID, data["auth_password"].(string), 0); err != nil {
-		return nil, err
+	for _, node := range nodes {
+		if err := s.assertUniqueUserCredential(ctx, node.ID, data["auth_password"].(string), 0); err != nil {
+			return nil, err
+		}
+		if existing, err := s.findStoredUserByNodeAndUsername(ctx, node.ID, toString(data["username"])); err != nil {
+			return nil, err
+		} else if existing != nil {
+			return nil, errors.New("该用户名已存在，请勿重复创建")
+		}
 	}
 
 	encryptedPassword, err := EncryptValue(data["auth_password"].(string), *s.cfg)
@@ -396,19 +549,24 @@ func (s *hysteriaService) createUser(ctx context.Context, payload map[string]any
 		return nil, errors.New("用户认证密码加密失败")
 	}
 
-	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO hysteria_users (public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.generateUserPublicID(ctx), node.ID, data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], data["speed_limit_mbps"], data["expires_at"])
-	if err != nil {
-		return nil, normalizeDBError(err, "用户创建失败")
+	var createdID int64
+	for index, node := range nodes {
+		result, err := s.db.ExecContext(ctx, `
+                INSERT INTO hysteria_users (public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			s.generateUserPublicID(ctx), node.ID, data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], data["speed_limit_mbps"], data["expires_at"])
+		if err != nil {
+			return nil, normalizeDBError(err, "用户创建失败")
+		}
+		if index == 0 {
+			createdID, err = result.LastInsertId()
+			if err != nil {
+				return nil, err
+			}
+		}
+		s.queueLocalAuthRefresh(ctx, node, nil)
 	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-	s.queueLocalAuthRefresh(ctx, *node, nil)
-	return s.getUser(ctx, id)
+	return s.getUser(ctx, createdID)
 }
 
 func (s *hysteriaService) updateUser(ctx context.Context, id int64, payload map[string]any) (map[string]any, error) {
@@ -429,16 +587,17 @@ func (s *hysteriaService) updateUser(ctx context.Context, id int64, payload map[
 	if err != nil {
 		return nil, err
 	}
-	nodeID := int64Value(data["node_id"])
-	nextNode, err := s.getStoredNode(ctx, nodeID)
+	relatedUsers, err := s.listStoredUsersByUsername(ctx, currentPlain.Username)
 	if err != nil {
 		return nil, err
 	}
-	if nextNode == nil {
-		return nil, errors.New("请选择有效节点")
+	if len(relatedUsers) == 0 {
+		return nil, errors.New("用户不存在")
 	}
-	if err := s.assertUniqueUserCredential(ctx, nodeID, data["auth_password"].(string), id); err != nil {
-		return nil, err
+	for _, item := range relatedUsers {
+		if err := s.assertUniqueUserCredential(ctx, item.NodeID, data["auth_password"].(string), item.ID); err != nil {
+			return nil, err
+		}
 	}
 
 	encryptedPassword, err := EncryptValue(data["auth_password"].(string), *s.cfg)
@@ -446,32 +605,32 @@ func (s *hysteriaService) updateUser(ctx context.Context, id int64, payload map[
 		return nil, errors.New("用户认证密码加密失败")
 	}
 
-	_, err = s.db.ExecContext(ctx, `
-		UPDATE hysteria_users SET node_id=?, username=?, auth_password=?, status=?, quota_gb=?, used_gb=?, speed_limit_mbps=?, expires_at=? WHERE id=?`,
-		data["node_id"], data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], data["speed_limit_mbps"], data["expires_at"], id)
-	if err != nil {
-		return nil, normalizeDBError(err, "用户更新失败")
-	}
-	if node, err := s.getStoredNode(ctx, current.NodeID); err == nil && node != nil {
-		kickClients := []string{}
-		nextUsername := toString(data["username"])
-		nextStatus := normalizeUserStatus(toString(data["status"]))
-		nextQuota := int64Value(data["quota_gb"])
-		nextUsed := int64Value(data["used_gb"])
-		nextExpires, _ := data["expires_at"].(sql.NullTime)
-		if currentPlain.Username != nextUsername {
-			kickClients = append(kickClients, currentPlain.Username, nextUsername)
+	nextUsername := toString(data["username"])
+	nextStatus := normalizeUserStatus(toString(data["status"]))
+	nextQuota := int64Value(data["quota_gb"])
+	nextUsed := int64Value(data["used_gb"])
+	nextExpires, _ := data["expires_at"].(sql.NullTime)
+	for _, item := range relatedUsers {
+		_, err = s.db.ExecContext(ctx, `
+                UPDATE hysteria_users SET username=?, auth_password=?, status=?, quota_gb=?, used_gb=?, speed_limit_mbps=?, expires_at=? WHERE id=?`,
+			data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], data["speed_limit_mbps"], data["expires_at"], item.ID)
+		if err != nil {
+			return nil, normalizeDBError(err, "用户更新失败")
 		}
-		if currentPlain.AuthPassword != toString(data["auth_password"]) {
-			kickClients = append(kickClients, currentPlain.Username)
+
+		if node, nodeErr := s.getStoredNode(ctx, item.NodeID); nodeErr == nil && node != nil {
+			kickClients := []string{}
+			if item.Username != nextUsername {
+				kickClients = append(kickClients, item.Username, nextUsername)
+			}
+			if item.AuthPassword != toString(data["auth_password"]) {
+				kickClients = append(kickClients, item.Username)
+			}
+			if nextStatus != "active" || (nextExpires.Valid && !nextExpires.Time.After(time.Now())) || (nextQuota > 0 && nextUsed >= nextQuota) {
+				kickClients = append(kickClients, item.Username, nextUsername)
+			}
+			s.queueLocalAuthRefresh(ctx, *node, uniqueTrimmedStrings(kickClients))
 		}
-		if nextStatus != "active" || (nextExpires.Valid && !nextExpires.Time.After(time.Now())) || (nextQuota > 0 && nextUsed >= nextQuota) {
-			kickClients = append(kickClients, currentPlain.Username, nextUsername)
-		}
-		s.queueLocalAuthRefresh(ctx, *node, uniqueTrimmedStrings(kickClients))
-	}
-	if current.NodeID != nodeID {
-		s.queueLocalAuthRefresh(ctx, *nextNode, []string{toString(data["username"])})
 	}
 	return s.getUser(ctx, id)
 }
@@ -485,9 +644,15 @@ func (s *hysteriaService) deleteUser(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `DELETE FROM hysteria_users WHERE id = ?`, id)
-	if err == nil {
-		if node, nodeErr := s.getStoredNode(ctx, current.NodeID); nodeErr == nil && node != nil {
+	relatedUsers, err := s.listStoredUsersByUsername(ctx, user.Username)
+	if err != nil {
+		return err
+	}
+	for _, item := range relatedUsers {
+		if _, err = s.db.ExecContext(ctx, `DELETE FROM hysteria_users WHERE id = ?`, item.ID); err != nil {
+			return err
+		}
+		if node, nodeErr := s.getStoredNode(ctx, item.NodeID); nodeErr == nil && node != nil {
 			s.queueLocalAuthRefresh(ctx, *node, []string{user.Username})
 		}
 	}
@@ -1673,6 +1838,33 @@ func (s *hysteriaService) listUsers(ctx context.Context, nodeID int64) ([]userRe
 			return nil, err
 		}
 		items = append(items, record)
+	}
+	return items, nil
+}
+
+func (s *hysteriaService) listStoredUsersByUsername(ctx context.Context, username string) ([]userRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+                SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+                FROM hysteria_users WHERE username = ? ORDER BY id DESC`, strings.TrimSpace(username))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]userRecord, 0)
+	for rows.Next() {
+		record, err := scanUserRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		record, err = s.decryptUser(record)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return items, nil
 }
