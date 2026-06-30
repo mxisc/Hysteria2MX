@@ -649,7 +649,7 @@ const filteredLogicalUsers = computed(() => logicalUsers.value)
 const filteredActiveUsers = computed(() => filteredLogicalUsers.value.filter((user) => user.abnormal_count === 0).length)
 const filteredSuspendedUsers = computed(() => filteredLogicalUsers.value.filter((user) => user.abnormal_count > 0).length)
 const filteredQuotaTotalGb = computed(() => filteredLogicalUsers.value.reduce((total, user) => total + Number(user.quota_gb || 0), 0))
-const filteredQuotaUsedGb = computed(() => filteredLogicalUsers.value.reduce((total, user) => total + Number(user.used_gb || 0), 0))
+const filteredQuotaUsedGb = computed(() => filteredLogicalUsers.value.reduce((total, user) => total + resolveLogicalUserUsedGb(user), 0))
 
 const selectedLogNode = computed(() => nodeList.value.find((node) => node.id === selectedLogNodeId.value) ?? panel.value.node ?? null)
 const selectedLogNodeUsesAgent = computed(() => {
@@ -1133,14 +1133,26 @@ function userTrafficKey(nodeId: number | null | undefined, username: string): st
   return `${nodeId ?? 0}:${username}`
 }
 
+function resolveUserUsedGb(user: HysteriaUser): number {
+  const stat = userTrafficStatsMap.value[userTrafficKey(user.node_id, user.username)]
+  if (stat && Number.isFinite(Number(stat.live_used_gb))) {
+    return Number(stat.live_used_gb)
+  }
+  return Number(user.used_gb || 0)
+}
+
+function resolveLogicalUserUsedGb(group: HysteriaLogicalUser): number {
+  return group.details.reduce((total, user) => total + resolveUserUsedGb(user), 0)
+}
+
 function resolveLogicalUserQuotaPercent(user: HysteriaLogicalUser): number {
   if (user.quota_gb <= 0) return 0
-  return Math.min(100, (user.used_gb / user.quota_gb) * 100)
+  return Math.min(100, (resolveLogicalUserUsedGb(user) / user.quota_gb) * 100)
 }
 
 function resolveUserQuotaPercent(user: HysteriaUser): number {
   if (user.quota_gb <= 0) return 0
-  return Math.min(100, (user.used_gb / user.quota_gb) * 100)
+  return Math.min(100, (resolveUserUsedGb(user) / user.quota_gb) * 100)
 }
 
 function resolveLogicalUserExpiresAt(group: HysteriaLogicalUser): string {
@@ -1202,7 +1214,7 @@ function aggregateLogicalUserRate(group: HysteriaLogicalUser): UserTrafficRate {
 }
 
 function hasVisibleUserTraffic(user: HysteriaUser): boolean {
-  if (Number(user.used_gb || 0) > 0) {
+  if (resolveUserUsedGb(user) > 0) {
     return true
   }
   const stats = userTrafficStatsMap.value[userTrafficKey(user.node_id, user.username)]
@@ -2862,7 +2874,7 @@ async function handleSendTestNotification() {
                   <span class="user-list-cell" data-label="到期时间">{{ resolveLogicalUserExpiresAt(group) }}</span>
                   <span class="user-list-cell user-list-traffic" data-label="流量进度">
                     <div class="user-list-traffic-top">
-                      <span class="traffic-text">{{ formatTrafficGB(group.used_gb) }} / {{ formatTrafficGB(group.quota_gb) }} GB · {{ resolveLogicalUserQuotaPercent(group).toFixed(0) }}%</span>
+                        <span class="traffic-text">{{ formatTrafficGB(resolveLogicalUserUsedGb(group)) }} / {{ formatTrafficGB(group.quota_gb) }} GB · {{ resolveLogicalUserQuotaPercent(group).toFixed(0) }}%</span>
                     </div>
                     <div class="traffic-bar-wrap user-list-traffic-bar">
                       <div class="traffic-bar" :style="{ width: resolveLogicalUserQuotaPercent(group) + '%' }"></div>
@@ -2888,7 +2900,7 @@ async function handleSendTestNotification() {
                     <span class="user-list-cell user-list-traffic" data-label="流量进度">
                       <div class="user-list-traffic-top">
                         <span class="traffic-text">
-                          {{ formatTrafficGB(user.used_gb) }} / {{ formatTrafficGB(user.quota_gb) }} GB · {{ resolveUserQuotaPercent(user).toFixed(0) }}%
+                          {{ formatTrafficGB(resolveUserUsedGb(user)) }} / {{ formatTrafficGB(user.quota_gb) }} GB · {{ resolveUserQuotaPercent(user).toFixed(0) }}%
                           · ↓ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.rxMbps) }}
                           ↑ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.txMbps) }}
                         </span>
