@@ -33,6 +33,7 @@ Keep this file short. Add or expand a note only when it changes future behavior 
 - Problem: production frontend breaks or bloats after build changes. Trigger: minification, obfuscation, dependency imports, or repeated Vite builds. Rule: avoid stacking aggressive minification with obfuscation, import only needed ECharts modules, and remove stale hashed assets not referenced by `public/index.html`.
 - Problem: admin pages become slow or visually unstable as data grows. Trigger: dashboard/list endpoints, user rows, setup/login layouts, sidebar branding, or desktop shell changes. Rule: keep `panel/state` lightweight, paginate multi-record views on the backend, keep desktop shell at `100vh` with explicit scroll containers, and treat responsive grid tracks as one unit.
 - Problem: mock or realtime UI state behaves inconsistently. Trigger: mock data factories, mock settings, realtime log/audit refresh. Rule: initialize shared mock state before factories, store mock controls in `system_settings`, and use Vue `nextTick` with container refs when auto-scrolling refreshed logs/audit records.
+- Problem: multi-node pages show stale or partial data when they rely on an implicit current node. Trigger: user traffic, node status, logs, or traffic statistics across multiple nodes. Rule: pass explicit `node_id`, group per-node realtime requests by `node_id + username`, and keep legacy `current_node` as compatibility data only, not as UI/business selection logic.
 
 ### Nodes, Agent, And Hysteria Runtime
 

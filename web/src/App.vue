@@ -96,6 +96,7 @@ const trafficPageSizeOptions = [6, 12, 24, 48] as const
 type SectionId = (typeof sections)[number]['id']
 
 type UserEditorForm = {
+  node_id: number
   username: string
   auth_password: string
   status: HysteriaUser['status']
@@ -129,7 +130,6 @@ const NODE_STATUS_SYNC_INTERVAL_MS = 60 * 1000
 
 function createEmptyPanelState(): HysteriaPanelState {
   return {
-    currentNodeId: null,
     node: null,
     service: {
       command: '',
@@ -239,6 +239,7 @@ function mapNodeToForm(node: HysteriaNodeConfig): HysteriaNodePayload {
 
 function createEmptyUserForm(): UserEditorForm {
   return {
+    node_id: 0,
     username: '',
     auth_password: '',
     status: 'active',
@@ -247,6 +248,10 @@ function createEmptyUserForm(): UserEditorForm {
     speed_limit_mbps: 0,
     expires_at: '',
   }
+}
+
+function resolveDefaultUserNodeId(): number {
+  return nodes.value[0]?.id ?? panel.value.node?.id ?? 0
 }
 
 function createEmptyAdminForm(): AdminEditorForm {
@@ -321,6 +326,7 @@ function togglePasswordVisibility(key: string): void {
 
 function mapUserToForm(user: HysteriaUser): UserEditorForm {
   return {
+    node_id: user.node_id,
     username: user.username,
     auth_password: user.auth_password,
     status: user.status,
@@ -396,7 +402,7 @@ function canAccessSection(sectionId: SectionId): boolean {
 }
 
 function resolveNodeRuntimeStatus(nodeId: number): ServiceStatus | 'unknown' {
-  return nodeRuntimeStatuses.value[nodeId] ?? (panel.value.currentNodeId === nodeId ? inferredServiceStatus.value : 'unknown')
+  return nodeRuntimeStatuses.value[nodeId] ?? 'unknown'
 }
 
 function nodeRuntimeStatusLabel(nodeId: number): string {
@@ -606,12 +612,6 @@ const insecureRemoteLogin = computed(() => {
   return window.location.protocol !== 'https:' && !['localhost', '127.0.0.1', '::1'].includes(hostname)
 })
 
-const inferredServiceStatus = computed<ServiceStatus>(() => {
-  if (busyAction.value.startsWith('service-') || busyAction.value === 'install') return 'degraded'
-  if (!panel.value.node) return 'stopped'
-  return panel.value.service.exitCode === 0 ? 'running' : 'stopped'
-})
-
 const filteredUsers = computed(() => users.value)
 
 const filteredActiveUsers = computed(() => filteredUsers.value.filter((user) => user.status === 'active').length)
@@ -626,9 +626,29 @@ const selectedLogNodeUsesAgent = computed(() => {
 })
 const realtimeLogRefreshEnabled = computed(() => auditLogRefreshMode.value === 'auto' && selectedLogNodeUsesAgent.value)
 const totalNodeCount = computed(() => panel.value.metrics.nodeCount)
+const nodeOverview = computed(() => {
+  const totals = {
+    running: 0,
+    degraded: 0,
+    stopped: 0,
+    unknown: 0,
+  }
+
+  for (const node of nodeList.value) {
+    const status = resolveNodeRuntimeStatus(node.id)
+    totals[status] += 1
+  }
+
+  return totals
+})
+const nodeOverviewRatio = computed(() => `${nodeOverview.value.running}/${totalNodeCount.value}`)
+const nodeOverviewDetail = computed(() => {
+  const overview = nodeOverview.value
+  if (!totalNodeCount.value) return '暂无节点'
+  return `异常 ${overview.degraded} · 停止 ${overview.stopped} · 检测中 ${overview.unknown}`
+})
 const activeUserRatio = computed(() => `${panel.value.metrics.activeUserCount}/${panel.value.metrics.userCount}`)
 const onlineUserRatio = computed(() => `${onlineClientTotal.value}/${panel.value.metrics.userCount}`)
-const currentNodeStatusLabel = computed(() => statusLabelMap[inferredServiceStatus.value])
 const appearanceSiteTitle = computed(() => systemSettingsForm.value.site_title.trim() || 'Hysteria2 Panel')
 const appearanceApiBaseUrl = computed(() => systemSettingsForm.value.public_api_base_url.trim() || '未设置')
 const appearanceMockSummary = computed(() => {
@@ -788,17 +808,22 @@ function startUserTrafficStatsAutoRefresh() {
 }
 
 async function loadUserTrafficStats() {
-  if (!panel.value.currentNodeId || !hasPermission('user.view') || !users.value.length) {
+  if (!hasPermission('user.view') || !users.value.length) {
     userTrafficStats.value = []
     previousUserTrafficSnapshot = null
     userTrafficRates.value = {}
     return
   }
   try {
-    const stats = await fetchUserTrafficStats(
-      panel.value.currentNodeId,
-      users.value.filter((user) => user.node_id === panel.value.currentNodeId).map((user) => user.username),
+    const statsGroups = await Promise.all(
+      [...new Set(users.value.map((user) => user.node_id))]
+        .filter((nodeId) => nodeId > 0)
+        .map((nodeId) => fetchUserTrafficStats(
+          nodeId,
+          users.value.filter((user) => user.node_id === nodeId).map((user) => user.username),
+        )),
     )
+    const stats = statsGroups.flat()
     userTrafficStats.value = stats
     updateUserTrafficRates(stats)
   } catch {
@@ -1137,9 +1162,9 @@ async function loadState() {
   await loadNodes(nodePage.value, false)
 
   if (selectedLogNodeId.value === null) {
-    selectedLogNodeId.value = data.currentNodeId ?? nodes.value[0]?.id ?? null
+    selectedLogNodeId.value = nodes.value[0]?.id ?? null
   } else if (!nodes.value.some((node) => node.id === selectedLogNodeId.value)) {
-    selectedLogNodeId.value = data.currentNodeId ?? nodes.value[0]?.id ?? null
+    selectedLogNodeId.value = nodes.value[0]?.id ?? null
   }
   if (data.node) {
     nodeForm.value = mapNodeToForm(data.node)
@@ -1148,7 +1173,7 @@ async function loadState() {
     operationOutput.value = data.service
   }
 
-  const nodeId = data.currentNodeId ?? nodes.value[0]?.id ?? null
+  const nodeId = data.node?.id ?? nodes.value[0]?.id ?? null
   if (nodeId && hasPermission('service.view')) {
     try {
       const [online, streams] = await Promise.all([
@@ -1224,9 +1249,9 @@ async function loadNodes(page = nodePage.value, syncSelectedNode = true) {
   }
 
   if (selectedLogNodeId.value === null) {
-    selectedLogNodeId.value = panel.value.currentNodeId ?? nodes.value[0]?.id ?? null
+    selectedLogNodeId.value = nodes.value[0]?.id ?? null
   } else if (!nodes.value.some((node) => node.id === selectedLogNodeId.value) && nodes.value.length) {
-    selectedLogNodeId.value = panel.value.currentNodeId ?? nodes.value[0]?.id ?? null
+    selectedLogNodeId.value = nodes.value[0]?.id ?? null
   }
 }
 
@@ -1450,6 +1475,7 @@ async function setSection(id: SectionId) {
   }
 
   if (id === 'overview' && session.value && hasPermission('panel.view')) {
+    await refreshNodeRuntimeStatuses()
     if (!trafficHistoryLoaded.value) {
       await loadTrafficHistory()
     } else {
@@ -1462,10 +1488,9 @@ async function setSection(id: SectionId) {
     if (!trafficHistoryLoaded.value) {
       await loadTrafficHistory()
     }
+    await refreshTrafficNodeRuntimeStatuses()
     if (hasPermission('traffic.sync')) {
       await syncTrafficUsageForTrafficView()
-    } else {
-      await refreshTrafficNodeRuntimeStatuses()
     }
   }
 
@@ -1708,6 +1733,7 @@ async function confirmDeleteNode() {
 function resetUserEditor() {
   editingUserId.value = null
   userForm.value = createEmptyUserForm()
+  userForm.value.node_id = resolveDefaultUserNodeId()
 }
 
 function openCreateUserModal() {
@@ -1728,7 +1754,12 @@ function handleEditUser(user: HysteriaUser) {
 }
 
 async function handleSubmitUser() {
+  if (userForm.value.node_id <= 0) {
+    showToast('请先选择节点', 'error')
+    return
+  }
   const payload: HysteriaUserPayload = {
+    node_id: userForm.value.node_id,
     username: userForm.value.username.trim(),
     auth_password: userForm.value.auth_password.trim(),
     status: userForm.value.status,
@@ -2432,9 +2463,9 @@ async function handleSendTestNotification() {
             <span class="primary">已配置节点</span>
           </article>
           <article class="metric-card">
-            <p>当前节点</p>
-            <strong>{{ panel.node?.name || '未配置' }}</strong>
-            <span :class="inferredServiceStatus === 'running' ? 'success' : 'warning'">{{ currentNodeStatusLabel }}</span>
+            <p>节点概览</p>
+            <strong>{{ nodeOverviewRatio }}</strong>
+            <span :class="nodeOverview.degraded || nodeOverview.stopped ? 'warning' : 'success'">{{ nodeOverviewDetail }}</span>
           </article>
           <article class="metric-card">
             <p>活跃用户</p>
@@ -3496,6 +3527,13 @@ async function handleSendTestNotification() {
         </div>
 
         <div class="form-grid two-up-grid modal-form-grid">
+          <label class="form-field">
+            <span>所属节点</span>
+            <select v-model.number="userForm.node_id">
+              <option :value="0" disabled>请选择节点</option>
+              <option v-for="node in nodeList" :key="node.id" :value="node.id">{{ node.name }}</option>
+            </select>
+          </label>
           <label class="form-field">
             <span>用户名</span>
             <input v-model="userForm.username" type="text" placeholder="client-001" />

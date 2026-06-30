@@ -34,7 +34,6 @@ import {
   getMockUserTrafficStats,
   mockServiceResult,
   resolveMockPanelEnabled,
-  selectMockNode,
 } from './mockPanelData'
 
 const API_BASE = '/api'
@@ -92,7 +91,7 @@ export async function fetchPanelState(): Promise<HysteriaPanelState> {
 export async function createNode(payload: HysteriaNodePayload): Promise<HysteriaNodeConfig> {
   if (await shouldUseMockPanel()) {
     return {
-      ...selectMockNode(101),
+      ...getMockNodes()[0],
       ...payload,
       id: Date.now(),
       current_node: 0,
@@ -127,10 +126,10 @@ export async function createNodeWithInstall(payload: HysteriaNodePayload): Promi
 export async function updateNode(id: number, payload: HysteriaNodePayload): Promise<HysteriaNodeConfig> {
   if (await shouldUseMockPanel()) {
     return {
-      ...selectMockNode(id),
+      ...(getMockNodes().find((node) => node.id === id) ?? getMockNodes()[0]),
       ...payload,
       id,
-      current_node: id === getMockPanelState().currentNodeId ? 1 : 0,
+      current_node: 0,
       ssh_password: null,
       ssh_private_key_path: null,
       updated_at: new Date().toISOString(),
@@ -165,17 +164,6 @@ export async function deleteNode(id: number): Promise<void> {
     method: 'DELETE',
     body: JSON.stringify({}),
   })
-}
-
-export async function selectNode(id: number): Promise<HysteriaNodeConfig> {
-  if (await shouldUseMockPanel()) {
-    return selectMockNode(id)
-  }
-  const result = await request<{ node: HysteriaNodeConfig }>(`/nodes/${id}/select`, {
-    method: 'POST',
-    body: JSON.stringify({}),
-  })
-  return result.node
 }
 
 export async function installHysteria(nodeId?: number | null): Promise<RemoteCommandResult> {
@@ -373,7 +361,6 @@ export async function createUser(payload: HysteriaUserPayload): Promise<Hysteria
     return {
       id: Date.now(),
       public_id: `usr_mock_${Date.now().toString(36)}`,
-      node_id: getMockPanelState().currentNodeId ?? 101,
       ...payload,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -436,7 +423,6 @@ export async function updateUser(id: number, payload: HysteriaUserPayload): Prom
     return {
       id,
       public_id: `usr_mock_${id}`,
-      node_id: getMockPanelState().currentNodeId ?? 101,
       ...payload,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

@@ -23,7 +23,6 @@ Cleanup policy:
 - If you are unsure whether something is safe to remove, do not delete it blindly; mention the uncertainty in the final response.
 
 Completion report:
-- Before finishing each task, decide whether the changes affect `README.md` usage, setup, behavior, configuration, screenshots, or documented workflows; if they do, update `README.md` in the same task.
 - In the final response, briefly state what was completed, whether `AI_PROJECT.md` was updated, whether cleanup was performed, and whether validation or tests were run.
 
 Database change policy:
