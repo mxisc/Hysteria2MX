@@ -455,7 +455,7 @@ func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user 
                 SELECT u.id, u.public_id, u.node_id, u.username, u.auth_password, u.status, u.quota_gb, u.used_gb, u.speed_limit_mbps, u.expires_at, u.created_at, u.updated_at,
                        COALESCE(n.name, '') AS node_name
                 FROM hysteria_users u
-                LEFT JOIN hysteria_nodes n ON n.id = u.node_id
+                LEFT JOIN server_nodes n ON n.id = u.node_id
                 WHERE u.username IN (`+placeholders+`)
                 ORDER BY u.username ASC, n.name ASC, u.id DESC`, detailArgs...)
 	if err != nil {
