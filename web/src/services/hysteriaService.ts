@@ -7,6 +7,7 @@ import type {
   HysteriaOnlineClient,
   HysteriaNodePayload,
   HysteriaPanelState,
+  HysteriaLogicalUser,
   PaginatedResult,
   HysteriaStreamItem,
   NotificationSettings,
@@ -401,6 +402,59 @@ export async function fetchUsers(page = 1, pageSize = 10, keyword = ''): Promise
     params.set('keyword', keyword.trim())
   }
   return request<PaginatedResult<HysteriaUser>>(`/users?${params.toString()}`)
+}
+
+export async function fetchLogicalUsers(page = 1, pageSize = 10, keyword = '', filter = 'all'): Promise<PaginatedResult<HysteriaLogicalUser>> {
+  if (await shouldUseMockPanel()) {
+    const lowered = keyword.trim().toLowerCase()
+    const nodesById = new Map(getMockNodes().map((node) => [node.id, node]))
+    const groups = new Map<string, HysteriaUser[]>()
+    for (const user of getMockUsers()) {
+      if (lowered && !user.username.toLowerCase().includes(lowered)) continue
+      const list = groups.get(user.username) ?? []
+      const node = nodesById.get(user.node_id)
+      list.push({ ...user, node_name: node?.name ?? `节点 #${user.node_id}` })
+      groups.set(user.username, list)
+    }
+    let items: HysteriaLogicalUser[] = Array.from(groups.entries()).map(([username, details]) => {
+      const abnormalCount = details.filter(isAbnormalUserRecord).length
+      return {
+        username,
+        status: abnormalCount > 0 ? 'partial_abnormal' : 'normal',
+        node_count: details.length,
+        quota_gb: details.reduce((total, user) => total + Number(user.quota_gb || 0), 0),
+        used_gb: details.reduce((total, user) => total + Number(user.used_gb || 0), 0),
+        abnormal_count: abnormalCount,
+        nodes: details.map((user) => ({ id: user.node_id, name: user.node_name ?? `节点 #${user.node_id}` })),
+        details,
+      }
+    })
+    items = items.filter((item) => {
+      if (filter === 'abnormal') return item.abnormal_count > 0
+      if (filter === 'single') return item.node_count === 1
+      if (filter === 'multi') return item.node_count > 1
+      return true
+    })
+    return paginateMock(items, page, pageSize)
+  }
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  })
+  if (keyword.trim()) {
+    params.set('keyword', keyword.trim())
+  }
+  if (filter && filter !== 'all') {
+    params.set('filter', filter)
+  }
+  return request<PaginatedResult<HysteriaLogicalUser>>(`/users/grouped?${params.toString()}`)
+}
+
+function isAbnormalUserRecord(user: HysteriaUser): boolean {
+  if (user.status !== 'active') return true
+  if (Number(user.quota_gb || 0) > 0 && Number(user.used_gb || 0) >= Number(user.quota_gb || 0)) return true
+  if (!user.expires_at) return false
+  return new Date(user.expires_at.replace(' ', 'T')).getTime() < Date.now()
 }
 
 function paginateMock<T>(items: T[], page: number, pageSize: number): PaginatedResult<T> {

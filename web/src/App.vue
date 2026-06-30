@@ -25,8 +25,8 @@ import {
   fetchLogs,
   fetchPanelState,
   fetchStreamPage,
+  fetchLogicalUsers,
   fetchUserSubscriptionInfo,
-  fetchUsers,
   fetchUserTrafficStats,
   fetchTrafficHistory,
   performServiceAction,
@@ -55,6 +55,7 @@ import type {
   AuditLogItem,
   AuthSession,
   HysteriaNodeConfig,
+  HysteriaLogicalUser,
   HysteriaNodePayload,
   HysteriaPanelState,
   HysteriaUser,
@@ -117,6 +118,7 @@ type AdminEditorForm = {
 type SetupEditorForm = SetupPayload
 
 type ToastType = 'success' | 'error' | 'info'
+type UserViewFilter = 'all' | 'abnormal' | 'single' | 'multi'
 type UserTrafficRate = {
   rxMbps: number | null
   txMbps: number | null
@@ -449,6 +451,7 @@ const loginError = ref('')
 const authNotice = ref('')
 const userFilter = ref('')
 const userFilterKeyword = ref('')
+const userViewFilter = ref<UserViewFilter>('all')
 const busyAction = ref('')
 const logsLoaded = ref(false)
 const logsText = ref('')
@@ -458,6 +461,7 @@ const nodePageSize = ref<(typeof listPageSizeOptions)[number]>(10)
 const nodePage = ref(1)
 const nodePagination = ref<PaginationMeta>(createPaginationMeta(nodePageSize.value))
 const users = ref<HysteriaUser[]>([])
+const logicalUsers = ref<HysteriaLogicalUser[]>([])
 const usersLoaded = ref(false)
 const userPageSize = ref<(typeof listPageSizeOptions)[number]>(10)
 const userPage = ref(1)
@@ -473,6 +477,7 @@ const onlineClientTotal = ref(0)
 const streamTotal = ref(0)
 const userTrafficStats = ref<UserTrafficStats[]>([])
 const userTrafficRates = ref<Record<string, UserTrafficRate>>({})
+const expandedLogicalUsers = ref<Record<string, boolean>>({})
 const trafficHistory = ref<NodeTrafficHistoryItem[]>([])
 const trafficNodeSummaries = ref<TrafficNodeSummary[]>([])
 const trafficHistoryLoaded = ref(false)
@@ -579,10 +584,12 @@ const statusLabelMap: Record<ServiceStatus, string> = {
   stopped: '已停止',
 }
 
-const userStatusLabelMap: Record<HysteriaUser['status'], string> = {
-  active: '正常',
-  suspended: '已停用',
-}
+const userViewFilterOptions: Array<{ value: UserViewFilter, label: string }> = [
+  { value: 'all', label: '全部用户' },
+  { value: 'abnormal', label: '异常用户' },
+  { value: 'single', label: '单节点用户' },
+  { value: 'multi', label: '多节点用户' },
+]
 
 const adminRoleLabelMap: Record<AdminRole, string> = {
   super_admin: '超级管理员',
@@ -603,6 +610,31 @@ const agentStatusLabelMap = {
   error: '异常',
 } as const
 
+const auditActionLabelMap: Record<string, string> = {
+  'admin.create': '创建管理员',
+  'admin.update': '更新管理员',
+  'admin.delete': '删除管理员',
+  'hysteria.deploy_config': '下发节点配置',
+  'hysteria.install': '安装节点服务',
+  'hysteria.service.restart': '重启节点服务',
+  'hysteria.service.start': '启动节点服务',
+  'hysteria.service.stop': '停止节点服务',
+  'hysteria.service.upgrade-agent': '升级 Agent',
+  'hysteria.sync_traffic': '同步节点流量',
+  'hysteria.uninstall': '卸载节点服务',
+  'node.create': '创建节点',
+  'node.create_install': '创建并安装节点',
+  'node.delete': '删除节点',
+  'node.update': '更新节点',
+  'notification_settings.test': '测试邮件通知',
+  'notification_settings.update': '更新邮件通知配置',
+  'system.upgrade': '系统升级',
+  'system_settings.update': '更新系统配置',
+  'user.create': '创建用户',
+  'user.delete': '删除用户',
+  'user.update': '更新用户',
+}
+
 const nodeList = computed(() => nodes.value)
 
 const visibleSections = computed(() => sections.filter((item) => canAccessSection(item.id)))
@@ -612,12 +644,12 @@ const insecureRemoteLogin = computed(() => {
   return window.location.protocol !== 'https:' && !['localhost', '127.0.0.1', '::1'].includes(hostname)
 })
 
-const filteredUsers = computed(() => users.value)
+const filteredLogicalUsers = computed(() => logicalUsers.value)
 
-const filteredActiveUsers = computed(() => filteredUsers.value.filter((user) => user.status === 'active').length)
-const filteredSuspendedUsers = computed(() => filteredUsers.value.filter((user) => user.status === 'suspended').length)
-const filteredQuotaTotalGb = computed(() => filteredUsers.value.reduce((total, user) => total + Number(user.quota_gb || 0), 0))
-const filteredQuotaUsedGb = computed(() => filteredUsers.value.reduce((total, user) => total + Number(user.used_gb || 0), 0))
+const filteredActiveUsers = computed(() => filteredLogicalUsers.value.filter((user) => user.abnormal_count === 0).length)
+const filteredSuspendedUsers = computed(() => filteredLogicalUsers.value.filter((user) => user.abnormal_count > 0).length)
+const filteredQuotaTotalGb = computed(() => filteredLogicalUsers.value.reduce((total, user) => total + Number(user.quota_gb || 0), 0))
+const filteredQuotaUsedGb = computed(() => filteredLogicalUsers.value.reduce((total, user) => total + Number(user.used_gb || 0), 0))
 
 const selectedLogNode = computed(() => nodeList.value.find((node) => node.id === selectedLogNodeId.value) ?? panel.value.node ?? null)
 const selectedLogNodeUsesAgent = computed(() => {
@@ -671,7 +703,7 @@ const userTrafficStatsMap = computed(() => {
 const userTrafficRateMap = computed(() => userTrafficRates.value)
 
 const filteredRealtimeUsers = computed(() => {
-  return filteredUsers.value.filter((user) => Boolean(userTrafficStatsMap.value[userTrafficKey(user.node_id, user.username)])).length
+  return filteredLogicalUsers.value.filter((group) => group.details.some((user) => Boolean(userTrafficStatsMap.value[userTrafficKey(user.node_id, user.username)]))).length
 })
 
 const aggregatedTrafficSeries = computed(() => {
@@ -1086,13 +1118,96 @@ function formatMbps(value: number | null | undefined): string {
   return `${value.toFixed(1)} Mbps`
 }
 
+function formatAuditAction(action: string): string {
+  return auditActionLabelMap[action] ?? action
+}
+
 function userTrafficKey(nodeId: number | null | undefined, username: string): string {
   return `${nodeId ?? 0}:${username}`
+}
+
+function resolveLogicalUserQuotaPercent(user: HysteriaLogicalUser): number {
+  if (user.quota_gb <= 0) return 0
+  return Math.min(100, (user.used_gb / user.quota_gb) * 100)
 }
 
 function resolveUserQuotaPercent(user: HysteriaUser): number {
   if (user.quota_gb <= 0) return 0
   return Math.min(100, (user.used_gb / user.quota_gb) * 100)
+}
+
+function resolveLogicalUserExpiresAt(group: HysteriaLogicalUser): string {
+  const timestamps = group.details
+    .map((user) => user.expires_at)
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(value.replace(' ', 'T')).getTime())
+    .filter((value) => Number.isFinite(value))
+  if (!timestamps.length) return '长期有效'
+  const earliest = new Date(Math.min(...timestamps))
+  const year = earliest.getFullYear()
+  const month = String(earliest.getMonth() + 1).padStart(2, '0')
+  const day = String(earliest.getDate()).padStart(2, '0')
+  const hours = String(earliest.getHours()).padStart(2, '0')
+  const minutes = String(earliest.getMinutes()).padStart(2, '0')
+  const seconds = String(earliest.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+}
+
+function resolveLogicalUserSpeedLimit(group: HysteriaLogicalUser): string {
+  const values = [...new Set(group.details.map((user) => Number(user.speed_limit_mbps || 0)))]
+  const positiveValues = values.filter((value) => value > 0)
+  if (!positiveValues.length) return '不限速'
+  if (positiveValues.length === 1) return `${positiveValues[0]} Mbps`
+  return `${Math.max(...positiveValues)} Mbps`
+}
+
+function resolveUserNodeName(user: HysteriaUser): string {
+  if (user.node_name) return user.node_name
+  return nodeList.value.find((node) => node.id === user.node_id)?.name ?? `节点 #${user.node_id}`
+}
+
+function isLogicalUserExpanded(group: HysteriaLogicalUser): boolean {
+  return Boolean(expandedLogicalUsers.value[group.username])
+}
+
+function toggleLogicalUserDetails(group: HysteriaLogicalUser): void {
+  expandedLogicalUsers.value = {
+    ...expandedLogicalUsers.value,
+    [group.username]: !isLogicalUserExpanded(group),
+  }
+}
+
+function aggregateLogicalUserRate(group: HysteriaLogicalUser): UserTrafficRate {
+  let rxMbps = 0
+  let txMbps = 0
+  let hasObservedRate = false
+
+  for (const user of group.details) {
+    const key = userTrafficKey(user.node_id, user.username)
+    if (!userTrafficStatsMap.value[key]) continue
+    hasObservedRate = true
+    const rate = userTrafficRateMap.value[key]
+    rxMbps += rate?.rxMbps ?? 0
+    txMbps += rate?.txMbps ?? 0
+  }
+
+  return hasObservedRate ? { rxMbps, txMbps } : { rxMbps: null, txMbps: null }
+}
+
+function hasVisibleUserTraffic(user: HysteriaUser): boolean {
+  if (Number(user.used_gb || 0) > 0) {
+    return true
+  }
+  const stats = userTrafficStatsMap.value[userTrafficKey(user.node_id, user.username)]
+  if (stats && (Number(stats.rx || 0) > 0 || Number(stats.tx || 0) > 0)) {
+    return true
+  }
+  const rates = userTrafficRateMap.value[userTrafficKey(user.node_id, user.username)]
+  return Boolean((rates?.rxMbps ?? 0) > 0 || (rates?.txMbps ?? 0) > 0)
+}
+
+function visibleLogicalUserDetails(group: HysteriaLogicalUser): HysteriaUser[] {
+  return group.details.filter((user) => hasVisibleUserTraffic(user))
 }
 
 function startAuditLogAutoRefresh() {
@@ -1256,8 +1371,9 @@ async function loadNodes(page = nodePage.value, syncSelectedNode = true) {
 }
 
 async function loadUsers(page = userPage.value) {
-  const result = await fetchUsers(page, userPageSize.value, userFilterKeyword.value)
-  users.value = result.items
+  const result = await fetchLogicalUsers(page, userPageSize.value, userFilterKeyword.value, userViewFilter.value)
+  logicalUsers.value = result.items
+  users.value = result.items.flatMap((item) => item.details)
   userPagination.value = result.pagination
   userPage.value = result.pagination.page
   usersLoaded.value = true
@@ -1591,6 +1707,8 @@ async function handleLogout() {
   nodesLoaded.value = false
   nodePagination.value = createPaginationMeta(nodePageSize.value)
   users.value = []
+  logicalUsers.value = []
+  expandedLogicalUsers.value = {}
   usersLoaded.value = false
   userPagination.value = createPaginationMeta(userPageSize.value)
   auditLogs.value = []
@@ -1746,16 +1864,24 @@ function closeUserModal() {
   showUserModal.value = false
 }
 
-function handleEditUser(user: HysteriaUser) {
-  editingUserId.value = user.id
-  userForm.value = mapUserToForm(user)
+function handleEditLogicalUser(group: HysteriaLogicalUser) {
+  const firstUser = group.details[0]
+  if (!firstUser) return
+  editingUserId.value = firstUser.id
+  userForm.value = mapUserToForm(firstUser)
   currentSection.value = 'users'
   showUserModal.value = true
 }
 
+async function handleOpenLogicalUserSubscription(group: HysteriaLogicalUser) {
+  const firstUser = group.details[0]
+  if (!firstUser) return
+  await openSubscriptionModal(firstUser)
+}
+
 async function handleSubmitUser() {
   if (userForm.value.node_id <= 0) {
-    showToast('请先选择节点', 'error')
+    showToast('请先创建节点', 'error')
     return
   }
   const payload: HysteriaUserPayload = {
@@ -1780,8 +1906,9 @@ async function handleSubmitUser() {
   showUserModal.value = false
 }
 
-async function handleDeleteUser(user: HysteriaUser) {
-  pendingDeleteUser.value = user
+async function handleDeleteLogicalUser(group: HysteriaLogicalUser) {
+  if (!group.details.length) return
+  pendingDeleteUser.value = group.details[0]
   showUserDeleteModal.value = true
 }
 
@@ -1873,6 +2000,11 @@ function handleUserFilterInput() {
     userPage.value = 1
     void loadUsers(1)
   }, 280)
+}
+
+function handleUserViewFilterChange() {
+  userPage.value = 1
+  void loadUsers(1)
 }
 
 function setNodePage(page: number) {
@@ -2492,10 +2624,10 @@ async function handleSendTestNotification() {
               <div ref="trafficChartContainer" class="traffic-chart-canvas"></div>
             </div>
             <div v-else-if="trafficHistoryLoaded && !trafficHistory.length" class="empty-card">
-              <p>暂无流量趋势数据，等待流量同步后自动记录</p>
+              <p>暂无数据</p>
             </div>
             <div v-else class="empty-card">
-              <p>加载流量趋势数据中...</p>
+              <p>加载中...</p>
             </div>
           </article>
         </section>
@@ -2562,7 +2694,7 @@ async function handleSendTestNotification() {
             </div>
           </div>
           <div v-else class="empty-card">
-            <p>暂无节点流量数据，等待采样后展示</p>
+            <p>暂无数据</p>
           </div>
         </article>
 
@@ -2673,7 +2805,7 @@ async function handleSendTestNotification() {
             </div>
           </div>
           <div v-else class="empty-card">
-            <p>当前还没有节点记录，点击右上角“新增节点”即可创建第一台节点。</p>
+            <p>暂无节点</p>
           </div>
         </article>
       </section>
@@ -2687,65 +2819,80 @@ async function handleSendTestNotification() {
                 <h3>用户管理</h3>
               </div>
               <div class="hero-actions">
+                <select v-model="userViewFilter" class="search-input user-view-filter" @change="handleUserViewFilterChange">
+                  <option v-for="option in userViewFilterOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                </select>
                 <input v-model="userFilter" class="search-input" type="text" placeholder="搜索用户名" @input="handleUserFilterInput" />
                 <button v-if="hasPermission('user.manage')" class="primary" :disabled="busyAction !== ''" @click="openCreateUserModal">新增用户</button>
               </div>
             </div>
 
-            <div v-if="filteredUsers.length" class="user-list-summary">
+            <div v-if="filteredLogicalUsers.length" class="user-list-summary">
               <div class="user-list-stats">
-                <span class="user-list-stat">结果 {{ filteredUsers.length }}/{{ userPagination.total }}</span>
-                <span class="user-list-stat">启用 {{ filteredActiveUsers }}/{{ filteredUsers.length }}</span>
-                <span class="user-list-stat">停用 {{ filteredSuspendedUsers }}</span>
+                <span class="user-list-stat">用户 {{ filteredLogicalUsers.length }}/{{ userPagination.total }}</span>
+                <span class="user-list-stat">正常 {{ filteredActiveUsers }}/{{ filteredLogicalUsers.length }}</span>
+                <span class="user-list-stat">异常 {{ filteredSuspendedUsers }}</span>
                 <span class="user-list-stat">流量 {{ filteredQuotaUsedGb }}/{{ filteredQuotaTotalGb }} GB</span>
-                <span class="user-list-stat">实时 {{ filteredRealtimeUsers }}/{{ filteredUsers.length }}</span>
+                <span class="user-list-stat">实时 {{ filteredRealtimeUsers }}/{{ filteredLogicalUsers.length }}</span>
               </div>
             </div>
 
-            <div v-if="filteredUsers.length" class="user-list-table">
+            <div v-if="filteredLogicalUsers.length" class="user-list-table">
               <div class="user-list-head">
                 <span>用户名</span>
-                <span>状态</span>
                 <span>到期时间</span>
-                <span>限速</span>
                 <span>流量进度</span>
+                <span>限速</span>
                 <span>实时速率</span>
                 <span>操作</span>
               </div>
-              <article v-for="user in filteredUsers" :key="user.id" class="user-list-row">
-                <span class="user-list-cell user-list-name" data-label="用户名">
-                  <strong>{{ user.username }}</strong>
-                </span>
-                <span class="user-list-cell user-list-status" data-label="状态">
-                  <span class="user-status" :class="user.status">{{ userStatusLabelMap[user.status] }}</span>
-                </span>
-                <span class="user-list-cell" data-label="到期时间">{{ user.expires_at || '长期有效' }}</span>
-                <span class="user-list-cell" data-label="限速">{{ user.speed_limit_mbps || 0 }} Mbps</span>
-                <span class="user-list-cell user-list-traffic" data-label="流量进度">
-                  <div class="user-list-traffic-top">
-                    <span class="traffic-text">{{ user.used_gb }} / {{ user.quota_gb }} GB</span>
-                    <strong>{{ resolveUserQuotaPercent(user).toFixed(0) }}%</strong>
-                  </div>
-                  <div class="traffic-bar-wrap user-list-traffic-bar">
-                    <div class="traffic-bar" :style="{ width: resolveUserQuotaPercent(user) + '%' }"></div>
-                  </div>
-                </span>
-                <span class="user-list-cell user-list-realtime" data-label="实时速率">
-                  <template v-if="userTrafficStatsMap[userTrafficKey(user.node_id, user.username)]">
-                    <span class="traffic-realtime-item" title="下行">↓ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.rxMbps) }}</span>
-                    <span class="traffic-realtime-item" title="上行">↑ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.txMbps) }}</span>
-                  </template>
-                  <template v-else>
-                    <span class="traffic-realtime-item" title="下行">↓ 0 Mbps</span>
-                    <span class="traffic-realtime-item" title="上行">↑ 0 Mbps</span>
-                  </template>
-                </span>
-                <span class="user-list-cell user-list-actions" data-label="操作">
-                  <button class="secondary compact-button" :disabled="busyAction === 'user-subscription'" @click="openSubscriptionModal(user)">{{ busyAction === 'user-subscription' ? '加载中...' : '订阅信息' }}</button>
-                  <button v-if="hasPermission('user.manage')" class="secondary compact-button" @click="handleEditUser(user)">编辑</button>
-                  <button v-if="hasPermission('user.manage')" class="secondary compact-button danger-button" @click="handleDeleteUser(user)">删除</button>
-                </span>
-              </article>
+              <template v-for="group in filteredLogicalUsers" :key="group.username">
+                <article class="user-list-row logical-user-row" @click="toggleLogicalUserDetails(group)">
+                  <span class="user-list-cell user-list-name" data-label="用户名">
+                    <strong>{{ group.username }}</strong>
+                    <small>{{ isLogicalUserExpanded(group) ? '收起节点明细' : '展开节点明细' }}</small>
+                  </span>
+                  <span class="user-list-cell" data-label="到期时间">{{ resolveLogicalUserExpiresAt(group) }}</span>
+                  <span class="user-list-cell user-list-traffic" data-label="流量进度">
+                    <div class="user-list-traffic-top">
+                      <span class="traffic-text">{{ group.used_gb }} / {{ group.quota_gb }} GB · {{ resolveLogicalUserQuotaPercent(group).toFixed(0) }}%</span>
+                    </div>
+                    <div class="traffic-bar-wrap user-list-traffic-bar">
+                      <div class="traffic-bar" :style="{ width: resolveLogicalUserQuotaPercent(group) + '%' }"></div>
+                    </div>
+                  </span>
+                  <span class="user-list-cell" data-label="限速">{{ resolveLogicalUserSpeedLimit(group) }}</span>
+                  <span class="user-list-cell user-list-realtime" data-label="实时速率">
+                    <span class="traffic-realtime-item" title="下行">↓ {{ formatMbps(aggregateLogicalUserRate(group).rxMbps) }}</span>
+                    <span class="traffic-realtime-item" title="上行">↑ {{ formatMbps(aggregateLogicalUserRate(group).txMbps) }}</span>
+                  </span>
+                  <span class="user-list-cell user-list-actions" data-label="操作" @click.stop>
+                    <button class="secondary compact-button" :disabled="busyAction === 'user-subscription'" @click="handleOpenLogicalUserSubscription(group)">{{ busyAction === 'user-subscription' ? '加载中...' : '订阅信息' }}</button>
+                    <button v-if="hasPermission('user.manage')" class="secondary compact-button" @click="handleEditLogicalUser(group)">编辑</button>
+                    <button v-if="hasPermission('user.manage')" class="secondary compact-button danger-button" @click="handleDeleteLogicalUser(group)">删除</button>
+                  </span>
+                </article>
+
+                <div v-if="isLogicalUserExpanded(group)" class="user-detail-list">
+                  <article v-for="user in visibleLogicalUserDetails(group)" :key="user.id" class="user-detail-row">
+                    <span class="user-list-cell user-list-name" data-label="节点">
+                      <strong>{{ resolveUserNodeName(user) }}</strong>
+                    </span>
+                    <span class="user-list-cell user-list-traffic" data-label="流量进度">
+                      <div class="user-list-traffic-top">
+                        <span class="traffic-text">
+                          {{ user.used_gb }} / {{ user.quota_gb }} GB · {{ resolveUserQuotaPercent(user).toFixed(0) }}%
+                          · ↓ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.rxMbps) }}
+                          ↑ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.txMbps) }}
+                        </span>
+                      </div>
+                      <div class="traffic-bar-wrap user-list-traffic-bar">
+                        <div class="traffic-bar" :style="{ width: resolveUserQuotaPercent(user) + '%' }"></div>
+                      </div>
+                    </span>
+                  </article>
+                </div>
+              </template>
             </div>
             <div v-if="userPagination.total > 0" class="audit-pagination">
               <div class="audit-page-size">
@@ -2762,7 +2909,7 @@ async function handleSendTestNotification() {
               </div>
             </div>
             <div v-else class="empty-card">
-              <p>当前没有用户记录。创建用户后可以直接分发账密和配额。</p>
+              <p>暂无用户</p>
             </div>
           </article>
         </section>
@@ -2825,30 +2972,32 @@ async function handleSendTestNotification() {
               <button v-if="hasPermission('audit.view')" class="secondary" :disabled="busyAction !== '' || realtimeLogRefreshEnabled" @click="handleRefreshAuditLogs">刷新审计</button>
             </div>
             <template v-if="hasPermission('audit.view') && auditLogs.length">
-              <div ref="auditLogListRef" class="audit-preview-list">
-                <article v-for="item in paginatedAuditLogs" :key="item.id" class="audit-preview-row">
-                  <strong>{{ item.action }}</strong>
-                  <span>{{ item.admin_display_name || item.admin_username || 'system' }}</span>
-                  <span>{{ item.created_at }}</span>
-                </article>
-              </div>
-              <div class="audit-pagination">
-                <div class="audit-page-size">
-                  <span>每页</span>
-                  <select v-model.number="auditLogPageSize" class="compact-select" @change="handleAuditPageSizeChange">
-                    <option v-for="size in listPageSizeOptions" :key="size" :value="size">{{ size }}</option>
-                  </select>
+              <div class="audit-records-panel">
+                <div ref="auditLogListRef" class="audit-preview-list">
+                  <article v-for="item in paginatedAuditLogs" :key="item.id" class="audit-preview-row">
+                    <strong>{{ formatAuditAction(item.action) }}</strong>
+                    <span>{{ item.admin_display_name || item.admin_username || 'system' }}</span>
+                    <span>{{ item.created_at }}</span>
+                  </article>
                 </div>
-                <span class="audit-page-info">{{ auditLogPageStart }}-{{ auditLogPageEnd }} / {{ auditLogPagination.total }}</span>
-                <div class="audit-page-actions">
-                  <button class="secondary compact-button" :disabled="auditLogPage <= 1" @click="setAuditLogPage(auditLogPage - 1)">上一页</button>
-                  <span>{{ auditLogPage }} / {{ auditLogTotalPages }}</span>
-                  <button class="secondary compact-button" :disabled="auditLogPage >= auditLogTotalPages" @click="setAuditLogPage(auditLogPage + 1)">下一页</button>
+                <div class="audit-pagination">
+                  <div class="audit-page-size">
+                    <span>每页</span>
+                    <select v-model.number="auditLogPageSize" class="compact-select" @change="handleAuditPageSizeChange">
+                      <option v-for="size in listPageSizeOptions" :key="size" :value="size">{{ size }}</option>
+                    </select>
+                  </div>
+                  <span class="audit-page-info">{{ auditLogPageStart }}-{{ auditLogPageEnd }} / {{ auditLogPagination.total }}</span>
+                  <div class="audit-page-actions">
+                    <button class="secondary compact-button" :disabled="auditLogPage <= 1" @click="setAuditLogPage(auditLogPage - 1)">上一页</button>
+                    <span>{{ auditLogPage }} / {{ auditLogTotalPages }}</span>
+                    <button class="secondary compact-button" :disabled="auditLogPage >= auditLogTotalPages" @click="setAuditLogPage(auditLogPage + 1)">下一页</button>
+                  </div>
                 </div>
               </div>
             </template>
             <div v-else class="empty-card">
-              <p>{{ hasPermission('audit.view') ? '当前还没有审计记录。' : '当前角色无权查看审计日志。' }}</p>
+              <p>{{ hasPermission('audit.view') ? '暂无记录' : '无权查看' }}</p>
             </div>
           </article>
           </section>
@@ -2906,37 +3055,23 @@ async function handleSendTestNotification() {
               </div>
             </div>
             <div v-else class="empty-card">
-              <p>当前还没有额外管理员账号。</p>
+              <p>暂无管理员</p>
             </div>
-          </article>
-
-          <article class="card">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">角色说明</p>
-                <h3>权限分层建议</h3>
-              </div>
-            </div>
-            <ul class="check-list">
-              <li>超级管理员：拥有所有节点、用户、背景与管理员管理能力。</li>
-              <li>运维管理员：可管理节点、用户、安装、启停和配置下发。</li>
-              <li>审计员：可查看节点、日志、审计与面板状态，但不能写入。</li>
-              <li>只读成员：可查看基础状态和用户列表，敏感连接信息会被脱敏。</li>
-            </ul>
           </article>
         </section>
       </section>
 
       <section v-else-if="currentSection === 'notifications'" class="content-page">
-        <section class="content-stack">
+        <section class="content-stack mail-stack">
           <article class="hero-card mail-hero-card">
             <div>
               <p class="eyebrow">邮件通知</p>
-              <h2>统一配置邮件通知通道</h2>
+              <h2>邮件通知</h2>
             </div>
-            <span class="mail-status-pill" :class="{ active: notificationSettingsForm.smtp_enabled }">
-              {{ notificationSettingsForm.smtp_enabled ? '已启用' : '未启用' }}
-            </span>
+            <label class="mail-status-toggle" :class="{ active: notificationSettingsForm.smtp_enabled }">
+              <input v-model="notificationSettingsForm.smtp_enabled" type="checkbox" />
+              <span>{{ notificationSettingsForm.smtp_enabled ? '已启用' : '未启用' }}</span>
+            </label>
             <div class="hero-actions">
               <button class="secondary" :disabled="busyAction === 'notification-test'" @click="handleSendTestNotification">发送测试</button>
               <button class="primary" :disabled="busyAction === 'notification-settings'" @click="handleSaveNotificationSettings">保存通知</button>
@@ -2944,37 +3079,30 @@ async function handleSendTestNotification() {
           </article>
 
           <section class="mail-notification-grid">
-            <article class="card mail-config-card mail-enable-card">
-              <label class="config-field inline-check-field">
-                <input v-model="notificationSettingsForm.smtp_enabled" type="checkbox" />
-                <span class="meta-label">启用邮件通知</span>
-              </label>
-            </article>
-
             <article class="card mail-config-card">
               <div class="section-head">
                 <div>
                   <p class="eyebrow">服务器</p>
-                  <h3>SMTP 连接配置</h3>
+                  <h3>SMTP 连接</h3>
                 </div>
               </div>
               <div class="background-config-grid mail-fields-grid">
-              <label class="config-field">
-                <span class="meta-label">SMTP 服务器</span>
-                <input v-model="notificationSettingsForm.smtp_host" class="background-select" type="text" placeholder="smtp.example.com" />
-              </label>
-              <label class="config-field">
-                <span class="meta-label">端口</span>
-                <input v-model.number="notificationSettingsForm.smtp_port" class="background-select" type="number" min="1" max="65535" />
-              </label>
-              <label class="config-field">
-                <span class="meta-label">加密方式</span>
-                <select v-model="notificationSettingsForm.smtp_encryption" class="background-select">
-                  <option value="tls">STARTTLS</option>
-                  <option value="ssl">SSL</option>
-                  <option value="none">不加密</option>
-                </select>
-              </label>
+                <label class="config-field">
+                  <span class="meta-label">SMTP 服务器</span>
+                  <input v-model="notificationSettingsForm.smtp_host" class="background-select" type="text" placeholder="smtp.example.com" />
+                </label>
+                <label class="config-field">
+                  <span class="meta-label">端口</span>
+                  <input v-model.number="notificationSettingsForm.smtp_port" class="background-select" type="number" min="1" max="65535" />
+                </label>
+                <label class="config-field">
+                  <span class="meta-label">加密方式</span>
+                  <select v-model="notificationSettingsForm.smtp_encryption" class="background-select">
+                    <option value="tls">STARTTLS</option>
+                    <option value="ssl">SSL</option>
+                    <option value="none">不加密</option>
+                  </select>
+                </label>
               </div>
             </article>
 
@@ -2986,33 +3114,33 @@ async function handleSendTestNotification() {
                 </div>
               </div>
               <div class="background-config-grid mail-fields-grid">
-              <label class="config-field">
-                <span class="meta-label">SMTP 用户名</span>
-                <input v-model="notificationSettingsForm.smtp_username" class="background-select" type="text" autocomplete="off" />
-              </label>
-              <label class="config-field">
-                <span class="meta-label">SMTP 密码</span>
-                <input
-                  v-model="notificationSettingsForm.smtp_password"
-                  class="background-select"
-                  type="password"
-                  autocomplete="new-password"
-                  :placeholder="notificationSettingsForm.smtp_password_configured ? '已保存，留空不修改' : '请输入 SMTP 密码'"
-                />
-              </label>
-              <label class="config-field">
-                <span class="meta-label">发件邮箱</span>
-                <input v-model="notificationSettingsForm.smtp_from_email" class="background-select" type="email" placeholder="noreply@example.com" />
-              </label>
-              <label class="config-field">
-                <span class="meta-label">发件名称</span>
-                <input v-model="notificationSettingsForm.smtp_from_name" class="background-select" type="text" placeholder="Hysteria2 Panel" />
-              </label>
-              <label class="config-field">
-                <span class="meta-label">接收邮箱</span>
-                <input v-model="notificationSettingsForm.smtp_notify_email" class="background-select" type="email" placeholder="admin@example.com" />
-              </label>
-            </div>
+                <label class="config-field">
+                  <span class="meta-label">SMTP 用户名</span>
+                  <input v-model="notificationSettingsForm.smtp_username" class="background-select" type="text" autocomplete="off" />
+                </label>
+                <label class="config-field">
+                  <span class="meta-label">SMTP 密码</span>
+                  <input
+                    v-model="notificationSettingsForm.smtp_password"
+                    class="background-select"
+                    type="password"
+                    autocomplete="new-password"
+                    :placeholder="notificationSettingsForm.smtp_password_configured ? '已保存，留空不修改' : '请输入 SMTP 密码'"
+                  />
+                </label>
+                <label class="config-field">
+                  <span class="meta-label">发件邮箱</span>
+                  <input v-model="notificationSettingsForm.smtp_from_email" class="background-select" type="email" placeholder="noreply@example.com" />
+                </label>
+                <label class="config-field">
+                  <span class="meta-label">发件名称</span>
+                  <input v-model="notificationSettingsForm.smtp_from_name" class="background-select" type="text" placeholder="Hysteria2 Panel" />
+                </label>
+                <label class="config-field">
+                  <span class="meta-label">接收邮箱</span>
+                  <input v-model="notificationSettingsForm.smtp_notify_email" class="background-select" type="email" placeholder="admin@example.com" />
+                </label>
+              </div>
             </article>
           </section>
 
@@ -3025,7 +3153,6 @@ async function handleSendTestNotification() {
             <div>
               <p class="eyebrow">综合配置</p>
               <h2>综合配置</h2>
-              <p class="hero-copy">左侧集中编辑配置，右侧直接查看登录页效果和当前生效摘要。</p>
             </div>
             <div class="appearance-hero-pills">
               <div class="appearance-pill">
@@ -3045,12 +3172,11 @@ async function handleSendTestNotification() {
 
           <section class="appearance-layout">
             <div class="appearance-main">
-              <article class="card">
+              <article class="card appearance-config-card">
                 <div class="section-head section-head-wrap">
                   <div>
                     <p class="eyebrow">站点配置</p>
                     <h3>基础信息</h3>
-                    <p class="appearance-card-copy">维护面板标题、对外 API 地址和浏览器图标。</p>
                   </div>
                   <div class="hero-actions">
                     <button class="primary" :disabled="busyAction === 'system-settings'" @click="handleSaveSystemSettings">保存基础配置</button>
@@ -3088,12 +3214,11 @@ async function handleSendTestNotification() {
                 </div>
               </article>
 
-              <article class="card">
+              <article class="card appearance-config-card">
                 <div class="section-head section-head-wrap">
                   <div>
                     <p class="eyebrow">登录页背景</p>
                     <h3>视觉配置</h3>
-                    <p class="appearance-card-copy">支持自定义背景图，可随时恢复默认效果。</p>
                   </div>
                   <div class="hero-actions">
                     <button class="secondary" :disabled="busyAction === 'system-settings'" @click="handleResetLoginBackground">恢复默认</button>
@@ -3114,12 +3239,11 @@ async function handleSendTestNotification() {
                 </div>
               </article>
 
-              <article class="card">
+              <article class="card appearance-config-card">
                 <div class="section-head section-head-wrap">
                   <div>
                     <p class="eyebrow">Mock 面板</p>
                     <h3>演示数据</h3>
-                    <p class="appearance-card-copy">用于演示后台效果，节点和用户数据会根据下面的参数动态生成。</p>
                   </div>
                   <div class="hero-actions">
                     <button class="primary" :disabled="busyAction === 'system-settings'" @click="handleSaveSystemSettings">保存 Mock 配置</button>
@@ -3158,12 +3282,11 @@ async function handleSendTestNotification() {
                 </div>
               </article>
 
-              <article class="card">
+              <article class="card appearance-config-card">
                 <div class="section-head section-head-wrap">
                   <div>
                     <p class="eyebrow">登录安全</p>
                     <h3>防暴力破解</h3>
-                    <p class="appearance-card-copy">控制失败次数、统计窗口和锁定时长。</p>
                   </div>
                   <div class="hero-actions">
                     <button class="primary" :disabled="busyAction === 'system-settings'" @click="handleSaveSystemSettings">保存安全配置</button>
@@ -3528,13 +3651,6 @@ async function handleSendTestNotification() {
 
         <div class="form-grid two-up-grid modal-form-grid">
           <label class="form-field">
-            <span>所属节点</span>
-            <select v-model.number="userForm.node_id">
-              <option :value="0" disabled>请选择节点</option>
-              <option v-for="node in nodeList" :key="node.id" :value="node.id">{{ node.name }}</option>
-            </select>
-          </label>
-          <label class="form-field">
             <span>用户名</span>
             <input v-model="userForm.username" type="text" placeholder="client-001" />
           </label>
@@ -3697,12 +3813,6 @@ async function handleSendTestNotification() {
         </div>
 
         <div class="qr-modal-body">
-          <div v-if="subscriptionInfo" class="user-list-summary">
-            <div class="user-list-stats">
-              <span class="user-list-stat">节点 {{ subscriptionInfo.node_count }}</span>
-              <span class="user-list-stat">{{ subscriptionInfo.nodes.map((item) => item.name).join(' / ') }}</span>
-            </div>
-          </div>
           <img class="qr-image" :src="buildQrCodeUrl(qrModalValue)" alt="订阅二维码" />
           <textarea class="config-editor qr-link-box" :value="qrModalValue" readonly spellcheck="false"></textarea>
         </div>

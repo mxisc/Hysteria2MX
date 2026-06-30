@@ -256,6 +256,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/hysteria/sync-traffic", a.handleSyncTraffic)
 	mux.HandleFunc("GET /api/jobs/", a.handleJob)
 	mux.HandleFunc("POST /api/hysteria/service/", a.handleServiceAction)
+	mux.HandleFunc("GET /api/users/grouped", a.handleLogicalUsers)
 	mux.HandleFunc("GET /api/users", a.handleUsers)
 	mux.HandleFunc("POST /api/users", a.handleCreateUser)
 	mux.HandleFunc("PUT /api/users/", a.handleUpdateUser)
@@ -1398,6 +1399,27 @@ func (a *App) handleUsers(writer http.ResponseWriter, request *http.Request) {
 	result, err := a.hysteria.listUsersPageForUser(request.Context(), user, page, pageSize, strings.TrimSpace(request.URL.Query().Get("keyword")))
 	if err != nil {
 		writeError(writer, http.StatusInternalServerError, "用户列表读取失败")
+		return
+	}
+	a.writeJSON(writer, http.StatusOK, apiEnvelope{Success: true, Data: result})
+}
+
+func (a *App) handleLogicalUsers(writer http.ResponseWriter, request *http.Request) {
+	user, ok := requireUser(request.Context(), a.auth, writer, request)
+	if !ok || !requirePermission(user, "user.view", writer) {
+		return
+	}
+	page, pageSize := readPagination(request)
+	result, err := a.hysteria.listLogicalUsersPageForUser(
+		request.Context(),
+		user,
+		page,
+		pageSize,
+		strings.TrimSpace(request.URL.Query().Get("keyword")),
+		strings.TrimSpace(request.URL.Query().Get("filter")),
+	)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "用户聚合列表读取失败")
 		return
 	}
 	a.writeJSON(writer, http.StatusOK, apiEnvelope{Success: true, Data: result})

@@ -168,6 +168,7 @@ export interface HysteriaUser {
   id: number
   public_id: string
   node_id: number
+  node_name?: string
   username: string
   auth_password: string
   status: UserStatus
@@ -188,6 +189,24 @@ export interface HysteriaUserPayload {
   used_gb: number
   speed_limit_mbps: number
   expires_at: string | null
+}
+
+export type LogicalUserStatus = 'normal' | 'partial_abnormal'
+
+export interface LogicalUserNode {
+  id: number
+  name: string
+}
+
+export interface HysteriaLogicalUser {
+  username: string
+  status: LogicalUserStatus
+  node_count: number
+  quota_gb: number
+  used_gb: number
+  abnormal_count: number
+  nodes: LogicalUserNode[]
+  details: HysteriaUser[]
 }
 
 export interface HysteriaPanelState {
