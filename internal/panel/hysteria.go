@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -71,6 +72,7 @@ type userRecord struct {
 	Status         string
 	QuotaGB        int64
 	UsedGB         int64
+	UsedBytes      int64
 	SpeedLimitMbps int
 	ExpiresAt      sql.NullTime
 	CreatedAt      time.Time
@@ -351,7 +353,7 @@ func (s *hysteriaService) listUsersPageForUser(ctx context.Context, user *authUs
 
 	args = append(args, pageSize, offset)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+                SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, used_bytes, speed_limit_mbps, expires_at, created_at, updated_at
 		FROM hysteria_users `+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
@@ -386,7 +388,7 @@ func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user 
 		args = append(args, "%"+keyword+"%")
 	}
 
-	abnormalSQL := `(status <> 'active' OR expires_at < NOW() OR (quota_gb > 0 AND used_gb >= quota_gb))`
+	abnormalSQL := `(status <> 'active' OR expires_at < NOW() OR (quota_gb > 0 AND used_bytes >= quota_gb * 1024 * 1024 * 1024))`
 	having := ``
 	switch filter {
 	case "abnormal":
@@ -400,8 +402,8 @@ func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user 
 	groupedSQL := `
                 SELECT username,
                        COUNT(*) AS node_count,
-                       SUM(quota_gb) AS quota_gb,
-                       SUM(used_gb) AS used_gb,
+                       MAX(quota_gb) AS quota_gb,
+                       SUM(used_bytes) AS used_bytes,
                        SUM(CASE WHEN ` + abnormalSQL + ` THEN 1 ELSE 0 END) AS abnormal_count,
                        MAX(updated_at) AS last_updated_at
                 FROM hysteria_users ` + where + `
@@ -424,7 +426,7 @@ func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user 
 		Username      string
 		NodeCount     int
 		QuotaGB       int64
-		UsedGB        int64
+		UsedBytes     int64
 		AbnormalCount int
 	}
 
@@ -433,7 +435,7 @@ func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user 
 	for rows.Next() {
 		var item groupedUserRow
 		var lastUpdatedAt time.Time
-		if err := rows.Scan(&item.Username, &item.NodeCount, &item.QuotaGB, &item.UsedGB, &item.AbnormalCount, &lastUpdatedAt); err != nil {
+		if err := rows.Scan(&item.Username, &item.NodeCount, &item.QuotaGB, &item.UsedBytes, &item.AbnormalCount, &lastUpdatedAt); err != nil {
 			return nil, err
 		}
 		groups = append(groups, item)
@@ -452,7 +454,7 @@ func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user 
 		detailArgs = append(detailArgs, username)
 	}
 	detailRows, err := s.db.QueryContext(ctx, `
-                SELECT u.id, u.public_id, u.node_id, u.username, u.auth_password, u.status, u.quota_gb, u.used_gb, u.speed_limit_mbps, u.expires_at, u.created_at, u.updated_at,
+                SELECT u.id, u.public_id, u.node_id, u.username, u.auth_password, u.status, u.quota_gb, u.used_gb, u.used_bytes, u.speed_limit_mbps, u.expires_at, u.created_at, u.updated_at,
                        COALESCE(n.name, '') AS node_name
                 FROM hysteria_users u
                 LEFT JOIN server_nodes n ON n.id = u.node_id
@@ -477,6 +479,7 @@ func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user 
 			&record.Status,
 			&record.QuotaGB,
 			&record.UsedGB,
+			&record.UsedBytes,
 			&record.SpeedLimitMbps,
 			&record.ExpiresAt,
 			&record.CreatedAt,
@@ -511,7 +514,7 @@ func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user 
 			"status":         status,
 			"node_count":     group.NodeCount,
 			"quota_gb":       group.QuotaGB,
-			"used_gb":        group.UsedGB,
+			"used_gb":        roundBytesToGigabytes(group.UsedBytes, 0),
 			"abnormal_count": group.AbnormalCount,
 			"nodes":          nodesByUsername[group.Username],
 			"details":        detailsByUsername[group.Username],
@@ -552,9 +555,9 @@ func (s *hysteriaService) createUser(ctx context.Context, payload map[string]any
 	var createdID int64
 	for index, node := range nodes {
 		result, err := s.db.ExecContext(ctx, `
-                INSERT INTO hysteria_users (public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			s.generateUserPublicID(ctx), node.ID, data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], data["speed_limit_mbps"], data["expires_at"])
+                INSERT INTO hysteria_users (public_id, node_id, username, auth_password, status, quota_gb, used_gb, used_bytes, speed_limit_mbps, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			s.generateUserPublicID(ctx), node.ID, data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], bytesFromGigabytesFloat(float64Value(data["used_gb"])), data["speed_limit_mbps"], data["expires_at"])
 		if err != nil {
 			return nil, normalizeDBError(err, "用户创建失败")
 		}
@@ -608,12 +611,12 @@ func (s *hysteriaService) updateUser(ctx context.Context, id int64, payload map[
 	nextUsername := toString(data["username"])
 	nextStatus := normalizeUserStatus(toString(data["status"]))
 	nextQuota := int64Value(data["quota_gb"])
-	nextUsed := int64Value(data["used_gb"])
+	nextUsedBytes := bytesFromGigabytesFloat(float64Value(data["used_gb"]))
 	nextExpires, _ := data["expires_at"].(sql.NullTime)
 	for _, item := range relatedUsers {
 		_, err = s.db.ExecContext(ctx, `
-                UPDATE hysteria_users SET username=?, auth_password=?, status=?, quota_gb=?, used_gb=?, speed_limit_mbps=?, expires_at=? WHERE id=?`,
-			data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], data["speed_limit_mbps"], data["expires_at"], item.ID)
+                UPDATE hysteria_users SET username=?, auth_password=?, status=?, quota_gb=?, used_gb=?, used_bytes=?, speed_limit_mbps=?, expires_at=? WHERE id=?`,
+			data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], nextUsedBytes, data["speed_limit_mbps"], data["expires_at"], item.ID)
 		if err != nil {
 			return nil, normalizeDBError(err, "用户更新失败")
 		}
@@ -626,7 +629,7 @@ func (s *hysteriaService) updateUser(ctx context.Context, id int64, payload map[
 			if item.AuthPassword != toString(data["auth_password"]) {
 				kickClients = append(kickClients, item.Username)
 			}
-			if nextStatus != "active" || (nextExpires.Valid && !nextExpires.Time.After(time.Now())) || (nextQuota > 0 && nextUsed >= nextQuota) {
+			if nextStatus != "active" || (nextExpires.Valid && !nextExpires.Time.After(time.Now())) || (nextQuota > 0 && nextUsedBytes >= gigabytesToBytes(nextQuota)) {
 				kickClients = append(kickClients, item.Username, nextUsername)
 			}
 			s.queueLocalAuthRefresh(ctx, *node, uniqueTrimmedStrings(kickClients))
@@ -1165,14 +1168,14 @@ func (s *hysteriaService) getUserMetricsForNode(ctx context.Context, nodeID int6
 	row := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*),
 		       COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0),
-		       COALESCE(SUM(quota_gb), 0),
-		       COALESCE(SUM(used_gb), 0)
+                       COALESCE(SUM(quota_gb), 0),
+                       COALESCE(SUM(used_bytes), 0)
 		FROM hysteria_users WHERE node_id = ?`, nodeID)
 	var userCount int
 	var activeUserCount int
 	var quotaTotalGB int64
-	var quotaUsedGB int64
-	if err := row.Scan(&userCount, &activeUserCount, &quotaTotalGB, &quotaUsedGB); err != nil {
+	var quotaUsedBytes int64
+	if err := row.Scan(&userCount, &activeUserCount, &quotaTotalGB, &quotaUsedBytes); err != nil {
 		return nil, err
 	}
 
@@ -1180,7 +1183,7 @@ func (s *hysteriaService) getUserMetricsForNode(ctx context.Context, nodeID int6
 		"userCount":       userCount,
 		"activeUserCount": activeUserCount,
 		"quotaTotalGb":    quotaTotalGB,
-		"quotaUsedGb":     quotaUsedGB,
+		"quotaUsedGb":     roundBytesToGigabytes(quotaUsedBytes, 0),
 	}, nil
 }
 
@@ -1271,7 +1274,7 @@ func (s *hysteriaService) decryptStoredNodeSecrets(record *nodeRecord) error {
 
 func (s *hysteriaService) getStoredUser(ctx context.Context, id int64) (*userRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+                SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, used_bytes, speed_limit_mbps, expires_at, created_at, updated_at
 		FROM hysteria_users WHERE id = ? LIMIT 1`, id)
 	record, err := scanUserRecord(row)
 	if err != nil {
@@ -1289,7 +1292,7 @@ func (s *hysteriaService) getStoredUserByPublicID(ctx context.Context, publicID 
 		return nil, nil
 	}
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+                SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, used_bytes, speed_limit_mbps, expires_at, created_at, updated_at
 		FROM hysteria_users WHERE public_id = ? LIMIT 1`, publicID)
 	record, err := scanUserRecord(row)
 	if err != nil {
@@ -1355,7 +1358,7 @@ func (s *hysteriaService) presentUser(record userRecord, canViewSensitive bool) 
 		"auth_password":    item.AuthPassword,
 		"status":           item.Status,
 		"quota_gb":         item.QuotaGB,
-		"used_gb":          item.UsedGB,
+		"used_gb":          roundBytesToGigabytes(item.UsedBytes, item.UsedGB),
 		"speed_limit_mbps": item.SpeedLimitMbps,
 		"expires_at":       nullTimeValue(item.ExpiresAt),
 		"created_at":       formatTime(item.CreatedAt),
@@ -1561,7 +1564,7 @@ func (s *hysteriaService) normalizeUserPayload(payload map[string]any, current *
 
 	status := normalizeUserStatus(defaultString(toTrimmedString(payload["status"]), currentValue.Status))
 	quotaGB := int64(boundedInt64(payload["quota_gb"], 0, 1<<31-1, currentValue.QuotaGB))
-	usedGB := int64(boundedInt64(payload["used_gb"], 0, 1<<31-1, currentValue.UsedGB))
+	usedGB := boundedFloat64(payload["used_gb"], 0, 1<<31-1, roundBytesToGigabytes(currentValue.UsedBytes, currentValue.UsedGB))
 	speedLimit := boundedInt(payload["speed_limit_mbps"], 0, 100000, currentValue.SpeedLimitMbps)
 	nodeID := int64(boundedInt64(payload["node_id"], 1, 1<<31-1, currentValue.NodeID))
 	if nodeID <= 0 {
@@ -1677,9 +1680,9 @@ func (s *hysteriaService) ensureSubscriptionUsersOnAvailableNodes(ctx context.Co
 			return errors.New("用户认证密码加密失败")
 		}
 		if _, err := s.db.ExecContext(ctx, `
-			INSERT INTO hysteria_users (public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			s.generateUserPublicID(ctx), node.ID, template.Username, encryptedPassword, template.Status, template.QuotaGB, template.UsedGB, template.SpeedLimitMbps, template.ExpiresAt); err != nil {
+                        INSERT INTO hysteria_users (public_id, node_id, username, auth_password, status, quota_gb, used_gb, used_bytes, speed_limit_mbps, expires_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			s.generateUserPublicID(ctx), node.ID, template.Username, encryptedPassword, template.Status, template.QuotaGB, template.UsedGB, template.UsedBytes, template.SpeedLimitMbps, template.ExpiresAt); err != nil {
 			return normalizeDBError(err, "订阅用户同步失败")
 		}
 		s.queueLocalAuthRefresh(ctx, node, nil)
@@ -1695,7 +1698,7 @@ func (s *hysteriaService) resolveSubscriptionEntries(ctx context.Context, userna
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+                SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, used_bytes, speed_limit_mbps, expires_at, created_at, updated_at
 		FROM hysteria_users WHERE username = ? ORDER BY id DESC`, username)
 	if err != nil {
 		return nil, err
@@ -1821,7 +1824,7 @@ func (s *hysteriaService) listUsers(ctx context.Context, nodeID int64) ([]userRe
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+                SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, used_bytes, speed_limit_mbps, expires_at, created_at, updated_at
 		FROM hysteria_users WHERE node_id = ? ORDER BY id DESC`, node.ID)
 	if err != nil {
 		return nil, err
@@ -1844,7 +1847,7 @@ func (s *hysteriaService) listUsers(ctx context.Context, nodeID int64) ([]userRe
 
 func (s *hysteriaService) listStoredUsersByUsername(ctx context.Context, username string) ([]userRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-                SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+                SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, used_bytes, speed_limit_mbps, expires_at, created_at, updated_at
                 FROM hysteria_users WHERE username = ? ORDER BY id DESC`, strings.TrimSpace(username))
 	if err != nil {
 		return nil, err
@@ -1871,7 +1874,7 @@ func (s *hysteriaService) listStoredUsersByUsername(ctx context.Context, usernam
 
 func (s *hysteriaService) findStoredUserByNodeAndUsername(ctx context.Context, nodeID int64, username string) (*userRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, speed_limit_mbps, expires_at, created_at, updated_at
+                SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, used_bytes, speed_limit_mbps, expires_at, created_at, updated_at
 		FROM hysteria_users WHERE node_id = ? AND username = ? LIMIT 1`, nodeID, username)
 	record, err := scanUserRecord(row)
 	if err != nil {
@@ -1928,7 +1931,7 @@ func (s *hysteriaService) authorizeClient(ctx context.Context, nodeID int64, cre
 		if user.ExpiresAt.Valid && !user.ExpiresAt.Time.After(time.Now()) {
 			return "", errors.New("账号已过期")
 		}
-		if user.QuotaGB > 0 && user.UsedGB >= user.QuotaGB {
+		if user.QuotaGB > 0 && user.UsedBytes >= gigabytesToBytes(user.QuotaGB) {
 			return "", errors.New("流量已用尽")
 		}
 		return user.Username, nil
@@ -1952,7 +1955,7 @@ func (s *hysteriaService) buildLocalAuthTaskPayload(ctx context.Context, node no
 			"credential":   user.AuthPassword,
 			"status":       normalizeUserStatus(user.Status),
 			"quota_gb":     user.QuotaGB,
-			"used_gb":      user.UsedGB,
+			"used_gb":      roundBytesToGigabytes(user.UsedBytes, user.UsedGB),
 			"speed_limit":  user.SpeedLimitMbps,
 			"expires_at":   expiresAt,
 			"subscribable": isUserSubscribable(user),
@@ -2666,16 +2669,20 @@ func (s *hysteriaService) applyTrafficUsagePayload(ctx context.Context, node nod
 		if !ok {
 			continue
 		}
-		usedGB := int64((int64Value(stats["rx"]) + int64Value(stats["tx"])) / 1024 / 1024 / 1024)
-		if _, err := s.db.ExecContext(ctx, `UPDATE hysteria_users SET used_gb = used_gb + ? WHERE node_id = ? AND username = ?`, usedGB, node.ID, username); err != nil {
+		usedBytes := int64Value(stats["rx"]) + int64Value(stats["tx"])
+		if _, err := s.db.ExecContext(ctx, `
+                UPDATE hysteria_users
+                SET used_bytes = used_bytes + ?,
+                    used_gb = FLOOR((used_bytes + ?) / 1024 / 1024 / 1024)
+                WHERE node_id = ? AND username = ?`, usedBytes, usedBytes, node.ID, username); err != nil {
 			return nil, err
 		}
 		user, err := s.findStoredUserByNodeAndUsername(ctx, node.ID, username)
 		if err != nil || user == nil {
 			continue
 		}
-		nextUsedGB := user.UsedGB + usedGB
-		if user.QuotaGB > 0 && nextUsedGB >= user.QuotaGB && normalizeUserStatus(user.Status) != "suspended" {
+		nextUsedBytes := user.UsedBytes + usedBytes
+		if user.QuotaGB > 0 && nextUsedBytes >= gigabytesToBytes(user.QuotaGB) && normalizeUserStatus(user.Status) != "suspended" {
 			if _, err := s.db.ExecContext(ctx, `UPDATE hysteria_users SET status = 'suspended' WHERE id = ?`, user.ID); err == nil {
 				suspendedUsers = append(suspendedUsers, username)
 			}
@@ -2732,6 +2739,24 @@ func formatBytes(bytes int64) string {
 	default:
 		return fmt.Sprintf("%.2f GB", float64(bytes)/1024/1024/1024)
 	}
+}
+
+func gigabytesToBytes(gb int64) int64 {
+	return gb * 1024 * 1024 * 1024
+}
+
+func roundBytesToGigabytes(bytes int64, fallback int64) float64 {
+	if bytes <= 0 {
+		return float64(fallback)
+	}
+	return math.Round((float64(bytes)/1024/1024/1024)*100) / 100
+}
+
+func bytesFromGigabytesFloat(value float64) int64 {
+	if value <= 0 {
+		return 0
+	}
+	return int64(math.Round(value * 1024 * 1024 * 1024))
 }
 
 func buildTrafficStatsURL(listen string) string {
@@ -2827,7 +2852,7 @@ func isUserSubscribable(user userRecord) bool {
 	if user.ExpiresAt.Valid && !user.ExpiresAt.Time.After(time.Now()) {
 		return false
 	}
-	return strings.TrimSpace(user.AuthPassword) != "" && (user.QuotaGB == 0 || user.UsedGB < user.QuotaGB)
+	return strings.TrimSpace(user.AuthPassword) != "" && (user.QuotaGB == 0 || user.UsedBytes < gigabytesToBytes(user.QuotaGB))
 }
 
 func scanNodeRecord(scanner interface{ Scan(...any) error }) (nodeRecord, error) {
@@ -2848,7 +2873,7 @@ func scanNodeRecord(scanner interface{ Scan(...any) error }) (nodeRecord, error)
 
 func scanUserRecord(scanner interface{ Scan(...any) error }) (userRecord, error) {
 	var record userRecord
-	err := scanner.Scan(&record.ID, &record.PublicID, &record.NodeID, &record.Username, &record.AuthPassword, &record.Status, &record.QuotaGB, &record.UsedGB, &record.SpeedLimitMbps, &record.ExpiresAt, &record.CreatedAt, &record.UpdatedAt)
+	err := scanner.Scan(&record.ID, &record.PublicID, &record.NodeID, &record.Username, &record.AuthPassword, &record.Status, &record.QuotaGB, &record.UsedGB, &record.UsedBytes, &record.SpeedLimitMbps, &record.ExpiresAt, &record.CreatedAt, &record.UpdatedAt)
 	return record, err
 }
 
@@ -3018,6 +3043,51 @@ func boundedInt64(value any, minValue int64, maxValue int64, fallback int64) int
 		number = int64(typed)
 	case string:
 		parsed, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
+		if err == nil {
+			number = parsed
+		}
+	}
+	if number < minValue {
+		return minValue
+	}
+	if number > maxValue {
+		return maxValue
+	}
+	return number
+}
+
+func float64Value(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		if err == nil {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func boundedFloat64(value any, minValue float64, maxValue float64, fallback float64) float64 {
+	number := fallback
+	switch typed := value.(type) {
+	case float64:
+		number = typed
+	case float32:
+		number = float64(typed)
+	case int64:
+		number = float64(typed)
+	case int:
+		number = float64(typed)
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
 		if err == nil {
 			number = parsed
 		}
