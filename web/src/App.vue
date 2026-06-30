@@ -1118,6 +1118,13 @@ function formatMbps(value: number | null | undefined): string {
   return `${value.toFixed(1)} Mbps`
 }
 
+function formatTrafficGB(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '0'
+  const normalized = Number(value)
+  if (Number.isInteger(normalized)) return String(normalized)
+  return normalized.toFixed(2).replace(/\.?0+$/, '')
+}
+
 function formatAuditAction(action: string): string {
   return auditActionLabelMap[action] ?? action
 }
@@ -2832,7 +2839,7 @@ async function handleSendTestNotification() {
                 <span class="user-list-stat">用户 {{ filteredLogicalUsers.length }}/{{ userPagination.total }}</span>
                 <span class="user-list-stat">正常 {{ filteredActiveUsers }}/{{ filteredLogicalUsers.length }}</span>
                 <span class="user-list-stat">异常 {{ filteredSuspendedUsers }}</span>
-                <span class="user-list-stat">流量 {{ filteredQuotaUsedGb }}/{{ filteredQuotaTotalGb }} GB</span>
+                <span class="user-list-stat">流量 {{ formatTrafficGB(filteredQuotaUsedGb) }}/{{ formatTrafficGB(filteredQuotaTotalGb) }} GB</span>
                 <span class="user-list-stat">实时 {{ filteredRealtimeUsers }}/{{ filteredLogicalUsers.length }}</span>
               </div>
             </div>
@@ -2855,7 +2862,7 @@ async function handleSendTestNotification() {
                   <span class="user-list-cell" data-label="到期时间">{{ resolveLogicalUserExpiresAt(group) }}</span>
                   <span class="user-list-cell user-list-traffic" data-label="流量进度">
                     <div class="user-list-traffic-top">
-                      <span class="traffic-text">{{ group.used_gb }} / {{ group.quota_gb }} GB · {{ resolveLogicalUserQuotaPercent(group).toFixed(0) }}%</span>
+                      <span class="traffic-text">{{ formatTrafficGB(group.used_gb) }} / {{ formatTrafficGB(group.quota_gb) }} GB · {{ resolveLogicalUserQuotaPercent(group).toFixed(0) }}%</span>
                     </div>
                     <div class="traffic-bar-wrap user-list-traffic-bar">
                       <div class="traffic-bar" :style="{ width: resolveLogicalUserQuotaPercent(group) + '%' }"></div>
@@ -2881,7 +2888,7 @@ async function handleSendTestNotification() {
                     <span class="user-list-cell user-list-traffic" data-label="流量进度">
                       <div class="user-list-traffic-top">
                         <span class="traffic-text">
-                          {{ user.used_gb }} / {{ user.quota_gb }} GB · {{ resolveUserQuotaPercent(user).toFixed(0) }}%
+                          {{ formatTrafficGB(user.used_gb) }} / {{ formatTrafficGB(user.quota_gb) }} GB · {{ resolveUserQuotaPercent(user).toFixed(0) }}%
                           · ↓ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.rxMbps) }}
                           ↑ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.txMbps) }}
                         </span>
@@ -3675,7 +3682,7 @@ async function handleSendTestNotification() {
           </label>
           <label class="form-field">
             <span>已用流量 GB</span>
-            <input v-model.number="userForm.used_gb" type="number" min="0" />
+            <input v-model.number="userForm.used_gb" type="number" min="0" step="0.01" />
           </label>
           <label class="form-field wide-field">
             <span>到期时间</span>

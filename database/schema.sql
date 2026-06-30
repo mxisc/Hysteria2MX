@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS hysteria_users (
     status ENUM('active', 'suspended') NOT NULL DEFAULT 'active',
     quota_gb BIGINT UNSIGNED NOT NULL DEFAULT 0,
     used_gb BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    used_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
     speed_limit_mbps INT NOT NULL DEFAULT 0,
     expires_at DATETIME NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
