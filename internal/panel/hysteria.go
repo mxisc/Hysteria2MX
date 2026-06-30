@@ -129,9 +129,8 @@ func (s *hysteriaService) panelStateForUser(ctx context.Context, user *authUser)
 	}
 
 	return map[string]any{
-		"currentNodeId": valueOrNil(node, func(item *nodeRecord) any { return item.ID }),
-		"node":          presentedNode,
-		"service":       service,
+		"node":    presentedNode,
+		"service": service,
 		"metrics": map[string]any{
 			"nodeCount":       nodeCount,
 			"userCount":       userMetrics["userCount"],
@@ -156,7 +155,7 @@ func (s *hysteriaService) listNodesPageForUser(ctx context.Context, user *authUs
 		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
 		       agent_install_path, agent_config_path, agent_service_name, created_at, updated_at
 		FROM server_nodes
-		ORDER BY current_node DESC, updated_at DESC, id DESC
+		ORDER BY updated_at DESC, id DESC
 		LIMIT ? OFFSET ?`, pageSize, offset)
 	if err != nil {
 		return nil, err
@@ -242,20 +241,15 @@ func (s *hysteriaService) saveNode(ctx context.Context, payload map[string]any, 
 		return s.getNodeForUser(ctx, nil, current.ID)
 	}
 
-	currentNodeExists := false
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) > 0 FROM server_nodes`).Scan(&currentNodeExists); err != nil {
-		return nil, err
-	}
-
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO server_nodes (
-			current_node, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path, sudo_password,
+			name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path, sudo_password,
 			install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret, tls_mode,
 			tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps, bandwidth_down_mbps,
 			manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds, agent_install_path,
 			agent_config_path, agent_service_name
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		boolToInt(!currentNodeExists), encrypted["name"], encrypted["host"], encrypted["ssh_port"], encrypted["ssh_username"], encrypted["ssh_auth_type"],
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		encrypted["name"], encrypted["host"], encrypted["ssh_port"], encrypted["ssh_username"], encrypted["ssh_auth_type"],
 		encrypted["ssh_password"], encrypted["ssh_private_key_path"], encrypted["sudo_password"], encrypted["install_script"], encrypted["service_name"],
 		encrypted["config_path"], encrypted["listen_port"], encrypted["traffic_stats_listen"], encrypted["traffic_stats_secret"], encrypted["tls_mode"],
 		encrypted["tls_cert_path"], encrypted["tls_key_path"], encrypted["domain"], encrypted["acme_email"], encrypted["obfs_password"],
@@ -307,10 +301,10 @@ func (s *hysteriaService) deleteNode(ctx context.Context, id int64) error {
 				 AND target_users.username = source_users.username
 				WHERE source_users.node_id = ?
 			  )
-			ORDER BY n.current_node DESC, n.updated_at DESC, n.id DESC
+			ORDER BY n.updated_at DESC, n.id DESC
 			LIMIT 1`, id, id).Scan(&nextID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return errors.New("当前节点还有用户，且没有其他节点可无冲突接收这些用户，请先迁移或处理用户后再删除节点")
+				return errors.New("该节点还有用户，且没有其他节点可无冲突接收这些用户，请先迁移或处理用户后再删除节点")
 			}
 			return err
 		}
@@ -322,18 +316,12 @@ func (s *hysteriaService) deleteNode(ctx context.Context, id int64) error {
 			SELECT id
 			FROM server_nodes
 			WHERE id <> ?
-			ORDER BY current_node DESC, updated_at DESC, id DESC
+			ORDER BY updated_at DESC, id DESC
 			LIMIT 1`, id).Scan(&nextID)
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM server_nodes WHERE id = ?`, id); err != nil {
 		return err
-	}
-
-	if node.CurrentNode == 1 && nextID > 0 {
-		if _, err := tx.ExecContext(ctx, `UPDATE server_nodes SET current_node = CASE WHEN id = ? THEN 1 ELSE 0 END`, nextID); err != nil {
-			return err
-		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -346,47 +334,11 @@ func (s *hysteriaService) deleteNode(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (s *hysteriaService) setCurrentNode(ctx context.Context, id int64) (map[string]any, error) {
-	node, err := s.getStoredNode(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if node == nil {
-		return nil, errors.New("节点不存在")
-	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, `UPDATE server_nodes SET current_node = 0`); err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE server_nodes SET current_node = 1 WHERE id = ?`, id); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-
-	return s.getNodeForUser(ctx, nil, id)
-}
-
 func (s *hysteriaService) listUsersPageForUser(ctx context.Context, user *authUser, page int, pageSize int, keyword string) (map[string]any, error) {
-	node, err := s.getStoredNode(ctx, 0)
-	if err != nil {
-		return nil, err
-	}
-	if node == nil {
-		return paginatedResult([]any{}, 1, pageSize, 0), nil
-	}
-
 	page, pageSize, offset := resolvePagination(page, pageSize)
 	keyword = strings.TrimSpace(keyword)
-	where := `WHERE node_id = ?`
-	args := []any{node.ID}
+	where := `WHERE 1=1`
+	args := []any{}
 	if keyword != "" {
 		where += ` AND username LIKE ?`
 		args = append(args, "%"+keyword+"%")
@@ -423,17 +375,17 @@ func (s *hysteriaService) listUsersPageForUser(ctx context.Context, user *authUs
 }
 
 func (s *hysteriaService) createUser(ctx context.Context, payload map[string]any) (map[string]any, error) {
-	node, err := s.getStoredNode(ctx, 0)
+	data, err := s.normalizeUserPayload(payload, nil)
+	if err != nil {
+		return nil, err
+	}
+	nodeID := int64Value(data["node_id"])
+	node, err := s.getStoredNode(ctx, nodeID)
 	if err != nil {
 		return nil, err
 	}
 	if node == nil {
-		return nil, errors.New("请先配置服务器节点")
-	}
-
-	data, err := s.normalizeUserPayload(payload, nil)
-	if err != nil {
-		return nil, err
+		return nil, errors.New("请选择有效节点")
 	}
 	if err := s.assertUniqueUserCredential(ctx, node.ID, data["auth_password"].(string), 0); err != nil {
 		return nil, err
@@ -477,7 +429,15 @@ func (s *hysteriaService) updateUser(ctx context.Context, id int64, payload map[
 	if err != nil {
 		return nil, err
 	}
-	if err := s.assertUniqueUserCredential(ctx, current.NodeID, data["auth_password"].(string), id); err != nil {
+	nodeID := int64Value(data["node_id"])
+	nextNode, err := s.getStoredNode(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	if nextNode == nil {
+		return nil, errors.New("请选择有效节点")
+	}
+	if err := s.assertUniqueUserCredential(ctx, nodeID, data["auth_password"].(string), id); err != nil {
 		return nil, err
 	}
 
@@ -487,8 +447,8 @@ func (s *hysteriaService) updateUser(ctx context.Context, id int64, payload map[
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		UPDATE hysteria_users SET username=?, auth_password=?, status=?, quota_gb=?, used_gb=?, speed_limit_mbps=?, expires_at=? WHERE id=?`,
-		data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], data["speed_limit_mbps"], data["expires_at"], id)
+		UPDATE hysteria_users SET node_id=?, username=?, auth_password=?, status=?, quota_gb=?, used_gb=?, speed_limit_mbps=?, expires_at=? WHERE id=?`,
+		data["node_id"], data["username"], encryptedPassword, data["status"], data["quota_gb"], data["used_gb"], data["speed_limit_mbps"], data["expires_at"], id)
 	if err != nil {
 		return nil, normalizeDBError(err, "用户更新失败")
 	}
@@ -509,6 +469,9 @@ func (s *hysteriaService) updateUser(ctx context.Context, id int64, payload map[
 			kickClients = append(kickClients, currentPlain.Username, nextUsername)
 		}
 		s.queueLocalAuthRefresh(ctx, *node, uniqueTrimmedStrings(kickClients))
+	}
+	if current.NodeID != nodeID {
+		s.queueLocalAuthRefresh(ctx, *nextNode, []string{toString(data["username"])})
 	}
 	return s.getUser(ctx, id)
 }
@@ -875,7 +838,7 @@ func (s *hysteriaService) getTrafficOverview(ctx context.Context, hours int, pag
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
-			n.id, n.name, n.host, n.current_node,
+			n.id, n.name, n.host,
 			COALESCE((
 				SELECT SUM(h.delta_rx)
 				FROM node_traffic_history h
@@ -899,7 +862,7 @@ func (s *hysteriaService) getTrafficOverview(ctx context.Context, hours int, pag
 				GROUP BY node_id
 			) grouped ON grouped.node_id = h.node_id AND grouped.max_recorded_at = h.recorded_at
 		) latest ON latest.node_id = n.id
-		ORDER BY n.current_node DESC, n.updated_at DESC, n.id DESC
+		ORDER BY n.updated_at DESC, n.id DESC
 		LIMIT ? OFFSET ?`,
 		trafficSummaryWindowDays,
 		trafficSummaryWindowDays,
@@ -917,21 +880,19 @@ func (s *hysteriaService) getTrafficOverview(ctx context.Context, hours int, pag
 			id          int64
 			name        string
 			host        string
-			currentNode int
 			totalRX     sql.NullInt64
 			totalTX     sql.NullInt64
 			userCount   sql.NullInt64
 			onlineCount sql.NullInt64
 			recordedAt  sql.NullTime
 		)
-		if err := rows.Scan(&id, &name, &host, &currentNode, &totalRX, &totalTX, &userCount, &onlineCount, &recordedAt); err != nil {
+		if err := rows.Scan(&id, &name, &host, &totalRX, &totalTX, &userCount, &onlineCount, &recordedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, map[string]any{
 			"id":          id,
 			"name":        name,
 			"host":        host,
-			"currentNode": currentNode == 1,
 			"onlineCount": nullInt64(onlineCount),
 			"userCount":   nullInt64(userCount),
 			"totalRx":     nullInt64(totalRX),
@@ -1071,7 +1032,7 @@ func (s *hysteriaService) getStoredNode(ctx context.Context, id int64) (*nodeRec
 		query += ` WHERE id = ? LIMIT 1`
 		args = append(args, id)
 	} else {
-		query += ` ORDER BY current_node DESC, updated_at DESC, id DESC LIMIT 1`
+		query += ` ORDER BY updated_at DESC, id DESC LIMIT 1`
 	}
 
 	row := s.db.QueryRowContext(ctx, query, args...)
@@ -1094,9 +1055,9 @@ func (s *hysteriaService) listStoredNodes(ctx context.Context) ([]nodeRecord, er
 		       sudo_password, install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret,
 		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps,
 		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
-		       agent_install_path, agent_config_path, agent_service_name, created_at, updated_at
+	       agent_install_path, agent_config_path, agent_service_name, created_at, updated_at
 		FROM server_nodes
-		ORDER BY current_node DESC, updated_at DESC, id DESC`)
+		ORDER BY updated_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -1257,7 +1218,7 @@ func (s *hysteriaService) decryptNode(record nodeRecord) (map[string]any, error)
 
 	return map[string]any{
 		"id":                               record.ID,
-		"current_node":                     record.CurrentNode,
+		"current_node":                     0,
 		"name":                             record.Name,
 		"host":                             record.Host,
 		"ssh_port":                         record.SSHPort,
@@ -1437,12 +1398,17 @@ func (s *hysteriaService) normalizeUserPayload(payload map[string]any, current *
 	quotaGB := int64(boundedInt64(payload["quota_gb"], 0, 1<<31-1, currentValue.QuotaGB))
 	usedGB := int64(boundedInt64(payload["used_gb"], 0, 1<<31-1, currentValue.UsedGB))
 	speedLimit := boundedInt(payload["speed_limit_mbps"], 0, 100000, currentValue.SpeedLimitMbps)
+	nodeID := int64(boundedInt64(payload["node_id"], 1, 1<<31-1, currentValue.NodeID))
+	if nodeID <= 0 {
+		return nil, errors.New("请选择节点")
+	}
 	expiresAt, err := normalizeNullableDateTime(payload["expires_at"], currentValue.ExpiresAt)
 	if err != nil {
 		return nil, err
 	}
 
 	return map[string]any{
+		"node_id":          nodeID,
 		"username":         username,
 		"auth_password":    authPassword,
 		"status":           status,
@@ -1474,7 +1440,7 @@ func (s *hysteriaService) assertUniqueUserCredential(ctx context.Context, nodeID
 			return err
 		}
 		if plain == authPassword {
-			return errors.New("当前节点已存在相同认证密码，请更换")
+			return errors.New("该节点已存在相同认证密码，请更换")
 		}
 	}
 	return nil
@@ -1928,7 +1894,7 @@ func (s *hysteriaService) buildNodeDependencyInstallCommand(node nodeRecord, pac
 		`elif command -v pacman >/dev/null 2>&1; then`,
 		`  pacman -Sy --noconfirm $missing_packages >/dev/null`,
 		`else`,
-		`  echo "当前节点系统暂不支持自动安装依赖，请先手动安装以下依赖后再重试: ` + packageList + `" >&2`,
+		`  echo "该节点系统暂不支持自动安装依赖，请先手动安装以下依赖后再重试: ` + packageList + `" >&2`,
 		`  exit 1`,
 		`fi`,
 		`echo "已自动安装节点依赖: $missing_packages"`,
@@ -2030,7 +1996,7 @@ func (s *hysteriaService) serviceAction(ctx context.Context, action string, node
 
 func (s *hysteriaService) upgradeAgent(ctx context.Context, node nodeRecord, apiBaseURL string) (map[string]any, error) {
 	if !s.shouldUseAgent(node) {
-		return nil, errors.New("当前节点未启用 Agent 管理")
+		return nil, errors.New("该节点未启用 Agent 管理")
 	}
 	result, err := s.deployAgentBootstrap(ctx, node, apiBaseURL)
 	if err != nil {
@@ -2454,10 +2420,10 @@ func (s *hysteriaService) callTrafficStatsAPI(ctx context.Context, node nodeReco
 		secret = strings.TrimSpace(node.ObfsPassword)
 	}
 	if strings.TrimSpace(node.TrafficStatsListen) == "" {
-		return nil, errors.New("当前节点未配置 trafficStats.listen")
+		return nil, errors.New("该节点未配置 trafficStats.listen")
 	}
 	if secret == "" {
-		return nil, errors.New("当前节点未配置 trafficStats.secret")
+		return nil, errors.New("该节点未配置 trafficStats.secret")
 	}
 	command := fmt.Sprintf("curl -fsSL -X %s -H %s", shellQuote(strings.ToUpper(method)), shellQuote("Authorization: "+secret))
 	if payload != nil {

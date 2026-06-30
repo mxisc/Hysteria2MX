@@ -180,6 +180,7 @@ export interface HysteriaUser {
 }
 
 export interface HysteriaUserPayload {
+  node_id: number
   username: string
   auth_password: string
   status: UserStatus
@@ -190,7 +191,6 @@ export interface HysteriaUserPayload {
 }
 
 export interface HysteriaPanelState {
-  currentNodeId: number | null
   node: HysteriaNodeConfig | null
   service: RemoteCommandResult
   metrics: PanelMetrics
@@ -234,7 +234,6 @@ export interface TrafficNodeSummary {
   id: number
   name: string
   host: string
-  currentNode: boolean
   onlineCount: number
   userCount: number
   totalRx: number

@@ -45,7 +45,7 @@ const NODE_PRESETS = [
   { region: 'sydney', role: 'edge', country: 'au' },
 ]
 
-let currentMockNodeId = 101
+let defaultMockNodeId = 101
 let mockPanelConfig: MockPanelConfig | null = null
 
 export function isMockPanelEnabled(): boolean {
@@ -60,11 +60,11 @@ export function applyMockPanelConfig(config: Partial<MockPanelConfig>): void {
   mockPanelConfig = nextConfig
   const nodes = buildMockNodes(nextConfig)
   if (!nodes.length) {
-    currentMockNodeId = 101
+    defaultMockNodeId = 101
     return
   }
-  if (!nodes.some((node) => node.id === currentMockNodeId)) {
-    currentMockNodeId = nodes[0].id
+  if (!nodes.some((node) => node.id === defaultMockNodeId)) {
+    defaultMockNodeId = nodes[0].id
   }
 }
 
@@ -94,13 +94,12 @@ export function getMockNodeRuntimeStatuses(): Record<number, ServiceStatus> {
 export function getMockPanelState(): HysteriaPanelState {
   const nodes = getMockNodes()
   const users = getMockUsers()
-  const node = nodes.find((item) => item.id === currentMockNodeId) ?? nodes[0]
-  currentMockNodeId = node.id
+  const node = nodes.find((item) => item.id === defaultMockNodeId) ?? nodes[0]
+  defaultMockNodeId = node.id
 
   return {
-    currentNodeId: currentMockNodeId,
-    node: { ...node, current_node: 1 },
-    service: mockServiceResult('status', currentMockNodeId),
+    node: { ...node, current_node: 0 },
+    service: mockServiceResult('status', defaultMockNodeId),
     metrics: {
       nodeCount: nodes.length,
       userCount: users.length,
@@ -113,21 +112,14 @@ export function getMockPanelState(): HysteriaPanelState {
 
 export function getMockNodes(): HysteriaNodeConfig[] {
   const nodes = buildMockNodes(getMockPanelConfig())
-  return nodes.map((item) => ({ ...item, current_node: item.id === currentMockNodeId ? 1 : 0 }))
+  return nodes.map((item) => ({ ...item, current_node: 0 }))
 }
 
 export function getMockUsers(): HysteriaUser[] {
   return buildMockUsers(getMockPanelConfig(), getMockNodes()).map((item) => ({ ...item }))
 }
 
-export function selectMockNode(id: number): HysteriaNodeConfig {
-  const nodes = getMockNodes()
-  const node = nodes.find((item) => item.id === id) ?? nodes[0]
-  currentMockNodeId = node.id
-  return { ...node, current_node: 1 }
-}
-
-export function mockServiceResult(action: ServiceAction, nodeId = currentMockNodeId): RemoteCommandResult {
+export function mockServiceResult(action: ServiceAction, nodeId = defaultMockNodeId): RemoteCommandResult {
   const nodes = getMockNodes()
   const users = getMockUsers()
   const node = nodes.find((item) => item.id === nodeId) ?? nodes[0]
@@ -151,7 +143,7 @@ export function mockServiceResult(action: ServiceAction, nodeId = currentMockNod
 export function getMockLogs(nodeId?: number | null): RemoteCommandResult {
   const nodes = getMockNodes()
   const users = getMockUsers()
-  const node = nodes.find((item) => item.id === (nodeId ?? currentMockNodeId)) ?? nodes[0]
+  const node = nodes.find((item) => item.id === (nodeId ?? defaultMockNodeId)) ?? nodes[0]
   const status = deriveNodeStatus(node)
   const lines = Array.from({ length: 80 }, (_, index) => {
     const level = index % 17 === 0 ? 'WARN' : status === 'degraded' && index % 9 === 0 ? 'ERROR' : 'INFO'
@@ -169,7 +161,7 @@ export function getMockLogs(nodeId?: number | null): RemoteCommandResult {
 export function getMockOnlineClients(nodeId?: number | null): HysteriaOnlineClient[] {
   const nodes = getMockNodes()
   const users = getMockUsers()
-  const targetNodeId = nodeId ?? currentMockNodeId
+  const targetNodeId = nodeId ?? defaultMockNodeId
   const node = nodes.find((item) => item.id === targetNodeId)
   const status = node ? deriveNodeStatus(node) : 'stopped'
   if (status === 'stopped') {
@@ -270,7 +262,6 @@ export function getMockTrafficHistory(hours = 24, page = 1, pageSize = 12): Traf
       id: node.id,
       name: node.name,
       host: node.host,
-      currentNode: node.current_node === 1,
       onlineCount: getMockOnlineClients(node.id).length,
       userCount: users.filter((user) => user.node_id === node.id).length,
       totalRx: totals.totalRx,
@@ -372,7 +363,7 @@ function buildMockNodes(config: MockPanelConfig): HysteriaNodeConfig[] {
     const domain = `${preset.country}-${String(index + 1).padStart(2, '0')}.example.com`
     const host = `node-${String(index + 1).padStart(2, '0')}.example.com`
     const status = statuses[index] ?? 'running'
-    return createNode(nodeId, name, host, domain, 8443 + (index % 3) * 1000, index % 4 === 2 ? 'self_signed' : 'acme', status, index === 0 ? 1 : 0)
+    return createNode(nodeId, name, host, domain, 8443 + (index % 3) * 1000, index % 4 === 2 ? 'self_signed' : 'acme', status)
   })
 }
 
@@ -427,11 +418,10 @@ function createNode(
   listenPort: number,
   tlsMode: 'acme' | 'self_signed',
   status: ServiceStatus,
-  currentNode: number,
 ): HysteriaNodeConfig {
   return {
     id,
-    current_node: currentNode,
+    current_node: 0,
     name,
     host,
     ssh_port: 22,

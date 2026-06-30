@@ -245,7 +245,6 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/nodes/ssh-key-upload", a.handleUploadNodeSSHKey)
 	mux.HandleFunc("PUT /api/nodes/", a.handleUpdateNode)
 	mux.HandleFunc("DELETE /api/nodes/", a.handleDeleteNode)
-	mux.HandleFunc("POST /api/nodes/", a.handleSelectNode)
 	mux.HandleFunc("GET /api/hysteria/online", a.handleOnlineClients)
 	mux.HandleFunc("GET /api/hysteria/streams", a.handleStreams)
 	mux.HandleFunc("GET /api/hysteria/traffic-stats", a.handleUserTrafficStats)
@@ -1175,28 +1174,6 @@ func (a *App) handleDeleteNode(writer http.ResponseWriter, request *http.Request
 		"node_id": id,
 	})
 	a.writeJSON(writer, http.StatusOK, apiEnvelope{Success: true, Data: map[string]any{}})
-}
-
-func (a *App) handleSelectNode(writer http.ResponseWriter, request *http.Request) {
-	user, ok := requireUser(request.Context(), a.auth, writer, request)
-	if !ok || !requirePermission(user, "node.manage", writer) {
-		return
-	}
-	id, ok := parsePathIDWithSuffix(request.URL.Path, "/api/nodes/", "/select")
-	if !ok {
-		writeError(writer, http.StatusNotFound, "接口不存在")
-		return
-	}
-	item, err := a.hysteria.setCurrentNode(request.Context(), id)
-	if err != nil {
-		writeError(writer, http.StatusBadRequest, httpSafeError(err, "当前节点切换失败"))
-		return
-	}
-	a.logAudit(request.Context(), user, request, "node.select", "node", strconv.FormatInt(id, 10), map[string]any{
-		"name":    item["name"],
-		"node_id": id,
-	})
-	a.writeJSON(writer, http.StatusOK, apiEnvelope{Success: true, Data: map[string]any{"node": item}})
 }
 
 func (a *App) handleOnlineClients(writer http.ResponseWriter, request *http.Request) {
