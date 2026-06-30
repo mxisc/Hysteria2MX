@@ -1174,6 +1174,12 @@ button {
   text-transform: uppercase;
 }
 
+.node-inline-head span:last-child,
+.user-list-head span:last-child {
+  justify-self: end;
+  text-align: right;
+}
+
 .user-list-row {
   padding: 14px 16px;
   border-radius: 18px;
