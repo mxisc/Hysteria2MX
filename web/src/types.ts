@@ -238,6 +238,8 @@ export interface UserTrafficStats {
   username: string
   rx: number
   tx: number
+  live_used_bytes?: number
+  live_used_gb?: number
   rx_human: string
   tx_human: string
   total_human: string

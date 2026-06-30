@@ -905,7 +905,10 @@ func (s *hysteriaService) getRealtimeTrafficStats(ctx context.Context, nodeID in
 	if err != nil {
 		return nil, err
 	}
-	items := buildUserTrafficStatsItems(node.ID, mapValue(result["payload"]), usernames)
+	items, err := s.buildRealtimeUserTrafficStats(ctx, node.ID, mapValue(result["payload"]), usernames)
+	if err != nil {
+		return nil, err
+	}
 	response := s.sliceListResponse(items, page, pageSize)
 	response["exitCode"] = 0
 	response["output"] = ""
@@ -921,7 +924,29 @@ func (s *hysteriaService) getCachedAgentUserTrafficStats(ctx context.Context, no
 		return []map[string]any{}, err
 	}
 	payload := mapValue(agent["last_payload_json"])
-	return buildUserTrafficStatsItems(nodeID, mapValue(payload["user_traffic"]), usernames), nil
+	return s.buildRealtimeUserTrafficStats(ctx, nodeID, mapValue(payload["user_traffic"]), usernames)
+}
+
+func (s *hysteriaService) buildRealtimeUserTrafficStats(ctx context.Context, nodeID int64, payload map[string]any, usernames []string) ([]map[string]any, error) {
+	items := buildUserTrafficStatsItems(nodeID, payload, usernames)
+	users, err := s.listUsers(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	usersByUsername := make(map[string]userRecord, len(users))
+	for _, user := range users {
+		usersByUsername[user.Username] = user
+	}
+	for _, item := range items {
+		user, ok := usersByUsername[toString(item["username"])]
+		if !ok {
+			continue
+		}
+		liveUsedBytes := liveUsedBytesForUser(user, item)
+		item["live_used_bytes"] = liveUsedBytes
+		item["live_used_gb"] = roundBytesToGigabytes(liveUsedBytes, user.UsedGB)
+	}
+	return items, nil
 }
 
 func buildUserTrafficStatsItems(nodeID int64, payload map[string]any, usernames []string) []map[string]any {
@@ -1818,6 +1843,41 @@ func (s *hysteriaService) queueLocalAuthRefresh(ctx context.Context, node nodeRe
 	_, _ = s.agents.enqueueTask(ctx, node.ID, opcodeKickClients, map[string]any{"clients": kickClients}, 0, 180)
 }
 
+func (s *hysteriaService) enforceRealtimeTrafficQuota(ctx context.Context, nodeID int64, payload map[string]any) error {
+	if s == nil || s.db == nil || len(payload) == 0 {
+		return nil
+	}
+	node, err := s.getStoredNode(ctx, nodeID)
+	if err != nil || node == nil {
+		return err
+	}
+	suspendedUsers := make([]string, 0)
+	for username, raw := range payload {
+		stats, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		user, err := s.findStoredUserByNodeAndUsername(ctx, nodeID, username)
+		if err != nil || user == nil {
+			continue
+		}
+		if normalizeUserStatus(user.Status) != "active" || user.QuotaGB <= 0 {
+			continue
+		}
+		if liveUsedBytesForUser(*user, stats) < gigabytesToBytes(user.QuotaGB) {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE hysteria_users SET status = 'suspended' WHERE id = ?`, user.ID); err == nil {
+			suspendedUsers = append(suspendedUsers, username)
+		}
+	}
+	suspendedUsers = uniqueTrimmedStrings(suspendedUsers)
+	if len(suspendedUsers) > 0 {
+		s.queueLocalAuthRefresh(ctx, *node, suspendedUsers)
+	}
+	return nil
+}
+
 func (s *hysteriaService) listUsers(ctx context.Context, nodeID int64) ([]userRecord, error) {
 	node, err := s.getStoredNode(ctx, nodeID)
 	if err != nil || node == nil {
@@ -2709,6 +2769,10 @@ func (s *hysteriaService) applyTrafficUsagePayload(ctx context.Context, node nod
 	baseResult["traffic"] = payload
 	baseResult["suspendedUsers"] = suspendedUsers
 	return baseResult, nil
+}
+
+func liveUsedBytesForUser(user userRecord, stats map[string]any) int64 {
+	return user.UsedBytes + int64Value(stats["rx"]) + int64Value(stats["tx"])
 }
 
 func (s *hysteriaService) sliceListResponse(items []map[string]any, page int, pageSize int) map[string]any {
