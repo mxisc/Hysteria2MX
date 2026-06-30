@@ -1056,7 +1056,7 @@ function bytesPerSecondToMbps(bytesPerSecond: number): number {
 }
 
 function formatMbps(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '0 Mb'
+  if (value === null || value === undefined || !Number.isFinite(value)) return '0 Mbps'
   if (value < 100) return `${value.toFixed(2)} Mbps`
   return `${value.toFixed(1)} Mbps`
 }
@@ -2704,7 +2704,10 @@ async function handleSendTestNotification() {
                     <span class="traffic-realtime-item" title="下行">↓ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.rxMbps) }}</span>
                     <span class="traffic-realtime-item" title="上行">↑ {{ formatMbps(userTrafficRateMap[userTrafficKey(user.node_id, user.username)]?.txMbps) }}</span>
                   </template>
-                  <span v-else class="traffic-text">0 Mb</span>
+                  <template v-else>
+                    <span class="traffic-realtime-item" title="下行">↓ 0 Mbps</span>
+                    <span class="traffic-realtime-item" title="上行">↑ 0 Mbps</span>
+                  </template>
                 </span>
                 <span class="user-list-cell user-list-actions" data-label="操作">
                   <button class="secondary compact-button" :disabled="busyAction === 'user-subscription'" @click="openSubscriptionModal(user)">{{ busyAction === 'user-subscription' ? '加载中...' : '订阅信息' }}</button>
