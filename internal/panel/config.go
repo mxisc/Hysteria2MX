@@ -267,6 +267,10 @@ func isReleaseStaticDir(value string) bool {
 	return strings.Contains(normalized, "/releases/") && strings.HasSuffix(normalized, "/public")
 }
 
+func PanelLogPath() string {
+	return filepath.Join(runtimeExecutableDir(), "logs", "panel.log")
+}
+
 func resolveConfigPath(configPath string) string {
 	configPath = strings.TrimSpace(configPath)
 	if configPath == "" {
@@ -307,17 +311,17 @@ func resolveProjectRoot(configPath string) string {
 }
 
 func runtimeRootFromExecutable() string {
-	execPath, err := os.Executable()
-	if err == nil {
-		if resolvedPath, resolveErr := filepath.EvalSymlinks(execPath); resolveErr == nil {
-			execPath = resolvedPath
-		}
-		execDir := filepath.Dir(execPath)
-		parentDir := filepath.Dir(execDir)
-		if filepath.Base(execDir) == "panel" && filepath.Base(parentDir) == "build" {
-			return filepath.Clean(filepath.Join(parentDir, ".."))
-		}
-		return execDir
+	execDir := runtimeExecutableDir()
+	parentDir := filepath.Dir(execDir)
+	if filepath.Base(execDir) == "panel" && filepath.Base(parentDir) == "build" {
+		return filepath.Clean(filepath.Join(parentDir, ".."))
+	}
+	return execDir
+}
+
+func runtimeExecutableDir() string {
+	if execPath, ok := runtimeExecutablePath(); ok {
+		return filepath.Dir(execPath)
 	}
 	if workdir, wdErr := os.Getwd(); wdErr == nil {
 		return workdir
@@ -325,13 +329,21 @@ func runtimeRootFromExecutable() string {
 	return "."
 }
 
-func runtimeReleaseRootFromExecutable() (string, bool) {
+func runtimeExecutablePath() (string, bool) {
 	execPath, err := os.Executable()
 	if err != nil {
 		return "", false
 	}
 	if resolvedPath, resolveErr := filepath.EvalSymlinks(execPath); resolveErr == nil {
 		execPath = resolvedPath
+	}
+	return execPath, true
+}
+
+func runtimeReleaseRootFromExecutable() (string, bool) {
+	execPath, ok := runtimeExecutablePath()
+	if !ok {
+		return "", false
 	}
 	execDir := filepath.Dir(execPath)
 	parentDir := filepath.Dir(execDir)

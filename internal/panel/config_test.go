@@ -3,6 +3,7 @@ package panel
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -29,6 +30,9 @@ func TestResolveProjectRootReleaseSharedConfig(t *testing.T) {
 		t.Fatalf("mkdir release root: %v", err)
 	}
 	if err := os.Symlink(releaseRoot, currentLink); err != nil {
+		if runtime.GOOS == "windows" || os.IsPermission(err) {
+			t.Skipf("skip release shared config symlink test without symlink permission: %v", err)
+		}
 		t.Fatalf("create current symlink: %v", err)
 	}
 

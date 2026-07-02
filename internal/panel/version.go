@@ -280,10 +280,13 @@ func rewritePanelServiceUnit(templatePath string, serviceName string, binaryPath
 	if err != nil {
 		return err
 	}
+	logDir := filepath.Join(filepath.Dir(binaryPath), "logs")
 	replacer := strings.NewReplacer(
 		"{{PANEL_INSTALL_PATH}}", binaryPath,
 		"{{PANEL_ENV_PATH}}", envPath,
 		"{{PANEL_WORKDIR}}", workdir,
+		"{{PANEL_LOG_DIR}}", logDir,
+		"{{PANEL_LOG_PATH}}", filepath.Join(logDir, "panel.log"),
 	)
 	unitPath := filepath.Join("/etc/systemd/system", serviceName+".service")
 	if err := os.WriteFile(unitPath, []byte(replacer.Replace(string(content))), 0o644); err != nil {

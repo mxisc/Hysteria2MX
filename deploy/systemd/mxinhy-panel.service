@@ -6,7 +6,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory={{PANEL_WORKDIR}}
+ExecStartPre=/bin/mkdir -p {{PANEL_LOG_DIR}}
 ExecStart={{PANEL_INSTALL_PATH}} -config {{PANEL_ENV_PATH}}
+StandardOutput=null
+StandardError=append:{{PANEL_LOG_PATH}}
 Restart=always
 RestartSec=2
 User=root

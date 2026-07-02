@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -22,7 +23,8 @@ func main() {
 	port := flag.Int("port", 0, "Override listen port, keeping the configured host")
 	flag.Parse()
 
-	logger := log.New(os.Stdout, "[mxinhy-panel] ", log.LstdFlags)
+	logger, closeLog := setupPanelLogger()
+	defer closeLog()
 
 	config, err := panel.LoadConfig(*configPath)
 	if err != nil {
@@ -64,6 +66,26 @@ func main() {
 
 	if err := server.Shutdown(shutdownContext); err != nil {
 		logger.Fatalf("shutdown: %v", err)
+	}
+}
+
+func setupPanelLogger() (*log.Logger, func()) {
+	logPath := panel.PanelLogPath()
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		logger := log.New(os.Stdout, "[mxinhy-panel] ", log.LstdFlags)
+		logger.Printf("create log directory failed: %v", err)
+		return logger, func() {}
+	}
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		logger := log.New(os.Stdout, "[mxinhy-panel] ", log.LstdFlags)
+		logger.Printf("open log file failed: %v", err)
+		return logger, func() {}
+	}
+	os.Stdout = file
+	os.Stderr = file
+	return log.New(file, "[mxinhy-panel] ", log.LstdFlags), func() {
+		_ = file.Close()
 	}
 }
 
