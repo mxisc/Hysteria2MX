@@ -3428,7 +3428,7 @@ async function handleSendTestNotification() {
               <option value="local">面板本机</option>
             </select>
           </label>
-          <label class="form-field">
+          <label v-if="nodeForm.deploy_mode === 'ssh'" class="form-field">
             <span>服务器地址</span>
             <input v-model="nodeForm.host" type="text" placeholder="1.2.3.4 或 server.example.com" />
           </label>
@@ -3488,7 +3488,7 @@ async function handleSendTestNotification() {
               </div>
             </div>
           </div>
-          <label class="form-field password-field">
+          <label v-if="nodeForm.deploy_mode === 'ssh'" class="form-field password-field">
             <span>Sudo 密码</span>
             <div class="password-control">
               <input
