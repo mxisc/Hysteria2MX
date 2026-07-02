@@ -47,8 +47,6 @@ ln -sfn "${REMOTE_SHARED_DIR}/storage" "${REMOTE_RELEASE_DIR}/storage"
 
 PANEL_ENV_PATH="${REMOTE_SHARED_DIR}/config/panel.env"
 PANEL_BINARY_PATH="${REMOTE_RELEASE_DIR}/build/panel/mxinhy-panel"
-PANEL_LOG_DIR="$(dirname "${PANEL_BINARY_PATH}")/logs"
-PANEL_LOG_PATH="${PANEL_LOG_DIR}/panel.log"
 PANEL_SERVICE_TEMPLATE="${REMOTE_RELEASE_DIR}/deploy/systemd/mxinhy-panel.service"
 
 if [ ! -f "${PANEL_ENV_PATH}" ] && [ -f "${REMOTE_RELEASE_DIR}/config/panel.env.example" ]; then
@@ -64,8 +62,6 @@ if command -v systemctl >/dev/null 2>&1; then
       -e "s|{{PANEL_INSTALL_PATH}}|${PANEL_BINARY_PATH}|g" \
       -e "s|{{PANEL_ENV_PATH}}|${PANEL_ENV_PATH}|g" \
       -e "s|{{PANEL_WORKDIR}}|${REMOTE_RELEASE_DIR}|g" \
-      -e "s|{{PANEL_LOG_DIR}}|${PANEL_LOG_DIR}|g" \
-      -e "s|{{PANEL_LOG_PATH}}|${PANEL_LOG_PATH}|g" \
       "${PANEL_SERVICE_TEMPLATE}" > "${PANEL_UNIT_PATH}"
     chmod 644 "${PANEL_UNIT_PATH}"
     systemctl daemon-reload
