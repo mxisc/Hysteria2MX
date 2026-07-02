@@ -43,8 +43,10 @@ CREATE TABLE IF NOT EXISTS server_nodes (
     agent_install_path VARCHAR(255) NOT NULL DEFAULT '/usr/local/bin/mxinhy-agent',
     agent_config_path VARCHAR(255) NOT NULL DEFAULT '/etc/mxinhy-agent.json',
     agent_service_name VARCHAR(128) NOT NULL DEFAULT 'mxinhy-agent',
+    deleted_at DATETIME NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_server_nodes_deleted_at (deleted_at)
 );
 
 CREATE TABLE IF NOT EXISTS hysteria_users (

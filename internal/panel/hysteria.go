@@ -59,6 +59,7 @@ type nodeRecord struct {
 	AgentInstallPath             string
 	AgentConfigPath              string
 	AgentServiceName             string
+	DeletedAt                    sql.NullTime
 	CreatedAt                    time.Time
 	UpdatedAt                    time.Time
 }
@@ -119,7 +120,7 @@ func (s *hysteriaService) panelStateForUser(ctx context.Context, user *authUser)
 
 	nodeCount := 0
 	if s.db != nil {
-		_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_nodes`).Scan(&nodeCount)
+		_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_nodes WHERE deleted_at IS NULL`).Scan(&nodeCount)
 	}
 
 	var presentedNode any
@@ -146,7 +147,7 @@ func (s *hysteriaService) panelStateForUser(ctx context.Context, user *authUser)
 func (s *hysteriaService) listNodesPageForUser(ctx context.Context, user *authUser, page int, pageSize int) (map[string]any, error) {
 	page, pageSize, offset := resolvePagination(page, pageSize)
 	total := 0
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_nodes`).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_nodes WHERE deleted_at IS NULL`).Scan(&total); err != nil {
 		return nil, err
 	}
 
@@ -155,8 +156,9 @@ func (s *hysteriaService) listNodesPageForUser(ctx context.Context, user *authUs
 		       sudo_password, install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret,
 		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps,
 		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
-		       agent_install_path, agent_config_path, agent_service_name, created_at, updated_at
+		       agent_install_path, agent_config_path, agent_service_name, deleted_at, created_at, updated_at
 		FROM server_nodes
+		WHERE deleted_at IS NULL
 		ORDER BY updated_at DESC, id DESC
 		LIMIT ? OFFSET ?`, pageSize, offset)
 	if err != nil {
@@ -188,6 +190,9 @@ func (s *hysteriaService) getNodeForUser(ctx context.Context, user *authUser, id
 	if node == nil {
 		return nil, errors.New("节点不存在")
 	}
+	if node.DeletedAt.Valid {
+		return nil, errors.New("节点不存在")
+	}
 	return s.presentNode(ctx, *node, s.canViewSensitiveFields(user))
 }
 
@@ -200,6 +205,9 @@ func (s *hysteriaService) saveNode(ctx context.Context, payload map[string]any, 
 			return nil, err
 		}
 		if current == nil {
+			return nil, errors.New("节点不存在")
+		}
+		if current.DeletedAt.Valid {
 			return nil, errors.New("节点不存在")
 		}
 	}
@@ -284,45 +292,10 @@ func (s *hysteriaService) deleteNode(ctx context.Context, id int64) error {
 	}
 	defer tx.Rollback()
 
-	var userCount int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM hysteria_users WHERE node_id = ?`, id).Scan(&userCount); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM hysteria_users WHERE node_id = ?`, id); err != nil {
 		return err
 	}
-
-	var nextID int64
-	if userCount > 0 {
-		if err := tx.QueryRowContext(ctx, `
-			SELECT n.id
-			FROM server_nodes n
-			WHERE n.id <> ?
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM hysteria_users source_users
-				JOIN hysteria_users target_users
-				  ON target_users.node_id = n.id
-				 AND target_users.username = source_users.username
-				WHERE source_users.node_id = ?
-			  )
-			ORDER BY n.updated_at DESC, n.id DESC
-			LIMIT 1`, id, id).Scan(&nextID); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return errors.New("该节点还有用户，且没有其他节点可无冲突接收这些用户，请先迁移或处理用户后再删除节点")
-			}
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE hysteria_users SET node_id = ? WHERE node_id = ?`, nextID, id); err != nil {
-			return err
-		}
-	} else {
-		_ = tx.QueryRowContext(ctx, `
-			SELECT id
-			FROM server_nodes
-			WHERE id <> ?
-			ORDER BY updated_at DESC, id DESC
-			LIMIT 1`, id).Scan(&nextID)
-	}
-
-	if _, err := tx.ExecContext(ctx, `DELETE FROM server_nodes WHERE id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE server_nodes SET deleted_at = COALESCE(deleted_at, NOW()) WHERE id = ?`, id); err != nil {
 		return err
 	}
 
@@ -347,14 +320,18 @@ func (s *hysteriaService) listUsersPageForUser(ctx context.Context, user *authUs
 	}
 
 	var total int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM hysteria_users `+where, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*)
+		FROM hysteria_users u
+		INNER JOIN server_nodes n ON n.id = u.node_id AND n.deleted_at IS NULL `+where, args...).Scan(&total); err != nil {
 		return nil, err
 	}
 
 	args = append(args, pageSize, offset)
 	rows, err := s.db.QueryContext(ctx, `
-                SELECT id, public_id, node_id, username, auth_password, status, quota_gb, used_gb, used_bytes, speed_limit_mbps, expires_at, created_at, updated_at
-		FROM hysteria_users `+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, args...)
+                SELECT u.id, u.public_id, u.node_id, u.username, u.auth_password, u.status, u.quota_gb, u.used_gb, u.used_bytes, u.speed_limit_mbps, u.expires_at, u.created_at, u.updated_at
+		FROM hysteria_users u
+		INNER JOIN server_nodes n ON n.id = u.node_id AND n.deleted_at IS NULL
+		`+where+` ORDER BY u.id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -381,14 +358,14 @@ func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user 
 	keyword = strings.TrimSpace(keyword)
 	filter = strings.TrimSpace(filter)
 
-	where := `WHERE 1=1`
+	where := `WHERE n.deleted_at IS NULL`
 	args := []any{}
 	if keyword != "" {
-		where += ` AND username LIKE ?`
+		where += ` AND u.username LIKE ?`
 		args = append(args, "%"+keyword+"%")
 	}
 
-	abnormalSQL := `(status <> 'active' OR expires_at < NOW() OR (quota_gb > 0 AND used_bytes >= quota_gb * 1024 * 1024 * 1024))`
+	abnormalSQL := `(u.status <> 'active' OR u.expires_at < NOW() OR (u.quota_gb > 0 AND u.used_bytes >= u.quota_gb * 1024 * 1024 * 1024))`
 	having := ``
 	switch filter {
 	case "abnormal":
@@ -400,14 +377,16 @@ func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user 
 	}
 
 	groupedSQL := `
-                SELECT username,
+                SELECT u.username,
                        COUNT(*) AS node_count,
-                       MAX(quota_gb) AS quota_gb,
-                       SUM(used_bytes) AS used_bytes,
+                       MAX(u.quota_gb) AS quota_gb,
+                       SUM(u.used_bytes) AS used_bytes,
                        SUM(CASE WHEN ` + abnormalSQL + ` THEN 1 ELSE 0 END) AS abnormal_count,
-                       MAX(updated_at) AS last_updated_at
-                FROM hysteria_users ` + where + `
-                GROUP BY username` + having
+                       MAX(u.updated_at) AS last_updated_at
+                FROM hysteria_users u
+                INNER JOIN server_nodes n ON n.id = u.node_id
+                ` + where + `
+                GROUP BY u.username` + having
 
 	var total int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+groupedSQL+`) grouped_users`, args...).Scan(&total); err != nil {
@@ -457,7 +436,7 @@ func (s *hysteriaService) listLogicalUsersPageForUser(ctx context.Context, user 
                 SELECT u.id, u.public_id, u.node_id, u.username, u.auth_password, u.status, u.quota_gb, u.used_gb, u.used_bytes, u.speed_limit_mbps, u.expires_at, u.created_at, u.updated_at,
                        COALESCE(n.name, '') AS node_name
                 FROM hysteria_users u
-                LEFT JOIN server_nodes n ON n.id = u.node_id
+                INNER JOIN server_nodes n ON n.id = u.node_id AND n.deleted_at IS NULL
                 WHERE u.username IN (`+placeholders+`)
                 ORDER BY u.username ASC, n.name ASC, u.id DESC`, detailArgs...)
 	if err != nil {
@@ -1025,7 +1004,7 @@ func (s *hysteriaService) getTrafficOverview(ctx context.Context, hours int, pag
 	}
 
 	total := 0
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_nodes`).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM server_nodes WHERE deleted_at IS NULL`).Scan(&total); err != nil {
 		return nil, err
 	}
 
@@ -1055,6 +1034,7 @@ func (s *hysteriaService) getTrafficOverview(ctx context.Context, hours int, pag
 				GROUP BY node_id
 			) grouped ON grouped.node_id = h.node_id AND grouped.max_recorded_at = h.recorded_at
 		) latest ON latest.node_id = n.id
+		WHERE n.deleted_at IS NULL
 		ORDER BY n.updated_at DESC, n.id DESC
 		LIMIT ? OFFSET ?`,
 		trafficSummaryWindowDays,
@@ -1218,14 +1198,14 @@ func (s *hysteriaService) getStoredNode(ctx context.Context, id int64) (*nodeRec
 		       sudo_password, install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret,
 		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps,
 		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
-		       agent_install_path, agent_config_path, agent_service_name, created_at, updated_at
+		       agent_install_path, agent_config_path, agent_service_name, deleted_at, created_at, updated_at
 		FROM server_nodes`
 	args := []any{}
 	if id > 0 {
 		query += ` WHERE id = ? LIMIT 1`
 		args = append(args, id)
 	} else {
-		query += ` ORDER BY updated_at DESC, id DESC LIMIT 1`
+		query += ` WHERE deleted_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT 1`
 	}
 
 	row := s.db.QueryRowContext(ctx, query, args...)
@@ -1248,8 +1228,9 @@ func (s *hysteriaService) listStoredNodes(ctx context.Context) ([]nodeRecord, er
 		       sudo_password, install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret,
 		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps,
 		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
-	       agent_install_path, agent_config_path, agent_service_name, created_at, updated_at
+	       agent_install_path, agent_config_path, agent_service_name, deleted_at, created_at, updated_at
 		FROM server_nodes
+		WHERE deleted_at IS NULL
 		ORDER BY updated_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
@@ -1274,7 +1255,14 @@ func (s *hysteriaService) listStoredNodes(ctx context.Context) ([]nodeRecord, er
 }
 
 func (s *hysteriaService) getNodeOrCurrent(ctx context.Context, nodeID int64) (*nodeRecord, error) {
-	return s.getStoredNode(ctx, nodeID)
+	node, err := s.getStoredNode(ctx, nodeID)
+	if err != nil || node == nil {
+		return node, err
+	}
+	if node.DeletedAt.Valid {
+		return nil, nil
+	}
+	return node, nil
 }
 
 func (s *hysteriaService) decryptStoredNodeSecrets(record *nodeRecord) error {
@@ -1640,7 +1628,7 @@ func (s *hysteriaService) assertUniqueUserCredential(ctx context.Context, nodeID
 }
 
 func (s *hysteriaService) assertNodeIdentityAvailable(ctx context.Context, data map[string]any, ignoreNodeID int64) error {
-	query := `SELECT id FROM server_nodes WHERE host = ? AND ssh_port = ? AND ssh_username = ? AND listen_port = ?`
+	query := `SELECT id FROM server_nodes WHERE deleted_at IS NULL AND host = ? AND ssh_port = ? AND ssh_username = ? AND listen_port = ?`
 	args := []any{data["host"], data["ssh_port"], data["ssh_username"], data["listen_port"]}
 	if ignoreNodeID > 0 {
 		query += ` AND id <> ?`
@@ -2929,7 +2917,7 @@ func scanNodeRecord(scanner interface{ Scan(...any) error }) (nodeRecord, error)
 		&record.TLSCertPath, &record.TLSKeyPath, &record.Domain, &record.ACMEEmail, &record.ObfsPassword, &record.MasqueradeURL,
 		&record.BandwidthUpMbps, &record.BandwidthDownMbps, &record.ManageMode, &agentEnabled, &record.AgentReportIntervalSeconds,
 		&record.AgentTaskPollIntervalSeconds, &record.AgentInstallPath, &record.AgentConfigPath, &record.AgentServiceName,
-		&record.CreatedAt, &record.UpdatedAt,
+		&record.DeletedAt, &record.CreatedAt, &record.UpdatedAt,
 	)
 	record.AgentEnabled = agentEnabled == 1
 	return record, err

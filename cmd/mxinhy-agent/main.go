@@ -32,6 +32,8 @@ const heartbeatFailureGraceMultiplier = 3
 const defaultLocalAuthListen = "127.0.0.1:18081"
 const defaultLocalAuthStatePath = "/var/lib/mxinhy-agent/local-auth.json"
 
+var errNodeDeleted = errors.New("node deleted by panel")
+
 type config struct {
 	NodeID                  int    `json:"node_id"`
 	AgentID                 string `json:"agent_id"`
@@ -46,6 +48,8 @@ type config struct {
 	ReportIntervalSeconds   int    `json:"report_interval_seconds"`
 	TaskPollIntervalSeconds int    `json:"task_poll_interval_seconds"`
 	AgentServiceName        string `json:"agent_service_name"`
+	AgentConfigPath         string `json:"-"`
+	AgentInstallPath        string `json:"-"`
 }
 
 type localAuthUser struct {
@@ -136,6 +140,7 @@ type agent struct {
 	registered           bool
 	lastHeartbeatSuccess time.Time
 	heartbeatGuardActive bool
+	selfUninstalling     bool
 
 	authMu                 sync.RWMutex
 	localAuthUsers         map[string]localAuthUser
@@ -255,6 +260,10 @@ func loadConfig(path string) (config, error) {
 	if cfg.LocalAuthStatePath == "" {
 		cfg.LocalAuthStatePath = defaultLocalAuthStatePath
 	}
+	cfg.AgentConfigPath = path
+	if executablePath, err := os.Executable(); err == nil {
+		cfg.AgentInstallPath = executablePath
+	}
 
 	return cfg, nil
 }
@@ -262,12 +271,20 @@ func loadConfig(path string) (config, error) {
 func (a *agent) run() error {
 	a.setLastHeartbeatSuccess(time.Now())
 	if err := a.register(); err != nil {
+		if errors.Is(err, errNodeDeleted) {
+			a.scheduleSelfUninstall("panel marked node deleted")
+			return nil
+		}
 		writeLog("warn", "initial register failed: %v", err)
 	} else {
 		a.markRegistered()
 		writeLog("info", "agent registered: node_id=%d service=%s", a.cfg.NodeID, a.cfg.ServiceName)
 	}
 	if err := a.sendHeartbeat(); err != nil {
+		if errors.Is(err, errNodeDeleted) {
+			a.scheduleSelfUninstall("panel marked node deleted")
+			return nil
+		}
 		writeLog("warn", "initial heartbeat failed: %v", err)
 		a.handleHeartbeatFailure()
 	} else {
@@ -285,6 +302,10 @@ func (a *agent) run() error {
 		case <-heartbeatTicker.C:
 			if !a.isRegistered() {
 				if err := a.register(); err != nil {
+					if errors.Is(err, errNodeDeleted) {
+						a.scheduleSelfUninstall("panel marked node deleted")
+						return nil
+					}
 					writeLog("warn", "register retry failed: %v", err)
 				} else {
 					a.markRegistered()
@@ -292,6 +313,10 @@ func (a *agent) run() error {
 				}
 			}
 			if err := a.sendHeartbeat(); err != nil {
+				if errors.Is(err, errNodeDeleted) {
+					a.scheduleSelfUninstall("panel marked node deleted")
+					return nil
+				}
 				writeLog("warn", "heartbeat failed: %v", err)
 				a.handleHeartbeatFailure()
 			} else {
@@ -299,6 +324,10 @@ func (a *agent) run() error {
 			}
 		case <-taskTicker.C:
 			if err := a.processNextTask(); err != nil {
+				if errors.Is(err, errNodeDeleted) {
+					a.scheduleSelfUninstall("panel marked node deleted")
+					return nil
+				}
 				writeLog("error", "task processing failed: %v", err)
 			}
 		}
@@ -364,6 +393,37 @@ func (a *agent) handleHeartbeatFailure() {
 		return
 	}
 	writeLog("warn", "heartbeat guard engaged: new connections are rejected after %s without successful heartbeats", a.heartbeatDisableAfter().Round(time.Second))
+}
+
+func (a *agent) scheduleSelfUninstall(reason string) {
+	a.mu.Lock()
+	if a.selfUninstalling {
+		a.mu.Unlock()
+		return
+	}
+	a.selfUninstalling = true
+	a.heartbeatGuardActive = true
+	a.mu.Unlock()
+
+	a.setLocalAuthState(localAuthState{Users: []localAuthUser{}})
+	_ = os.Remove(a.cfg.LocalAuthStatePath)
+	writeLog("warn", "self uninstall scheduled: %s", reason)
+
+	command := fmt.Sprintf(
+		`mkdir -p /var/log/mxinhy-agent; (sleep 1; systemctl stop %s 2>/dev/null || true; systemctl disable %s 2>/dev/null || true; rm -f %s; rm -rf %s; rm -f %s; systemctl daemon-reload 2>/dev/null || true; systemctl stop %s 2>/dev/null || true; systemctl disable %s 2>/dev/null || true; rm -f %s; rm -rf %s; rm -f %s; rm -f %s; systemctl daemon-reload 2>/dev/null || true) >/var/log/mxinhy-agent/self-uninstall.log 2>&1 &`,
+		shellQuote(a.cfg.ServiceName),
+		shellQuote(a.cfg.ServiceName),
+		shellQuote(a.cfg.ConfigPath),
+		shellQuote("/etc/systemd/system/"+a.cfg.ServiceName+".service.d"),
+		shellQuote(a.cfg.LocalAuthStatePath),
+		shellQuote(a.cfg.AgentServiceName),
+		shellQuote(a.cfg.AgentServiceName),
+		shellQuote("/etc/systemd/system/"+a.cfg.AgentServiceName+".service"),
+		shellQuote("/etc/systemd/system/"+a.cfg.AgentServiceName+".service.d"),
+		shellQuote(a.cfg.AgentConfigPath),
+		shellQuote(a.cfg.AgentInstallPath),
+	)
+	_, _ = runCommand(command)
 }
 
 func (a *agent) register() error {
@@ -1137,6 +1197,9 @@ func (a *agent) postJSON(path string, payload interface{}, target interface{}) e
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
+	}
+	if resp.StatusCode == http.StatusGone {
+		return errNodeDeleted
 	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("panel request failed: %s", strings.TrimSpace(string(respBody)))

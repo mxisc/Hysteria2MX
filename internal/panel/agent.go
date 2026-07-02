@@ -216,7 +216,51 @@ func (s *agentService) authenticateRequest(ctx context.Context, request *http.Re
 	if !hmac.Equal([]byte(expected), []byte(signature)) {
 		return nil, errors.New("Agent 鉴权失败")
 	}
+	deleted, err := s.isNodeDeleted(ctx, int64Value(record["node_id"]))
+	if err != nil {
+		return nil, err
+	}
+	record["node_deleted"] = deleted
 	return record, nil
+}
+
+func (s *agentService) isNodeDeleted(ctx context.Context, nodeID int64) (bool, error) {
+	if nodeID < 1 {
+		return true, nil
+	}
+	var deletedAt sql.NullTime
+	err := s.db.QueryRowContext(ctx, `SELECT deleted_at FROM server_nodes WHERE id = ? LIMIT 1`, nodeID).Scan(&deletedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, nil
+		}
+		return false, err
+	}
+	return deletedAt.Valid, nil
+}
+
+func (s *agentService) revokeAgentSecret(ctx context.Context, record map[string]any, reason string) error {
+	if record == nil {
+		return nil
+	}
+	id := int64Value(record["id"])
+	if id < 1 {
+		return nil
+	}
+	secret, err := randomHex(32)
+	if err != nil {
+		return err
+	}
+	encryptedSecret, err := EncryptValue("revoked_"+secret, *s.cfg)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		UPDATE node_agents
+		SET shared_secret = ?, status = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`,
+		encryptedSecret, agentStatusOffline, strings.TrimSpace(reason), id)
+	return err
 }
 
 func (s *agentService) signAgentRequest(secret, timestamp, nonce, rawBody string) string {
