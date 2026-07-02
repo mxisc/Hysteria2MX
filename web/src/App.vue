@@ -2761,7 +2761,7 @@ async function handleSendTestNotification() {
               </span>
               <span>{{ node.host }}</span>
               <span>{{ node.listen_port }}/udp</span>
-              <span>
+              <span class="node-inline-info">
                 {{ resolveNodeDeployLabel(node) }}
                 ·
                 {{ resolveNodeManageLabel(node) }}
