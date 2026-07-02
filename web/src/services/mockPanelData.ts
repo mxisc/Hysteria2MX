@@ -453,6 +453,7 @@ function createNode(
   return {
     id,
     current_node: 0,
+    deploy_mode: 'ssh',
     name,
     host,
     ssh_port: 22,

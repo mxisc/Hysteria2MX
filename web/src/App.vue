@@ -164,6 +164,7 @@ function createDefaultObfsPassword(): string {
 function createEmptyNodeForm(): HysteriaNodePayload {
   return {
     name: 'default-node',
+    deploy_mode: 'ssh',
     host: '',
     ssh_port: 22,
     ssh_username: 'root',
@@ -203,6 +204,7 @@ function createEmptyNodeForm(): HysteriaNodePayload {
 function mapNodeToForm(node: HysteriaNodeConfig): HysteriaNodePayload {
   return {
     name: node.name,
+    deploy_mode: node.deploy_mode ?? 'ssh',
     host: node.host,
     ssh_port: Number(node.ssh_port),
     ssh_username: node.ssh_username,
@@ -433,6 +435,10 @@ function resolveAgentStatusLabel(node: HysteriaNodeConfig): string {
 
 function resolveNodeManageLabel(node: HysteriaNodeConfig): string {
   return node.manage_mode === 'agent' ? 'Agent' : 'SSH'
+}
+
+function resolveNodeDeployLabel(node: HysteriaNodeConfig): string {
+  return node.deploy_mode === 'local' ? '本机' : '远端'
 }
 
 function ensureSectionAccess() {
@@ -1810,7 +1816,7 @@ async function handleSaveNode() {
   const isEditing = Boolean(editingNodeId.value)
   try {
     const node = await withBusyAction('node-save', async () => {
-      if (nodeForm.value.ssh_auth_type === 'key' && nodePrivateKeyFile.value) {
+      if (nodeForm.value.deploy_mode === 'ssh' && nodeForm.value.ssh_auth_type === 'key' && nodePrivateKeyFile.value) {
         nodeKeyUploading.value = true
         try {
           const uploadResult = await uploadNodeSshKey(nodePrivateKeyFile.value)
@@ -2116,16 +2122,6 @@ async function handleRestartNode(node: HysteriaNodeConfig) {
   )
   operationOutput.value = result
   nodeRuntimeStatuses.value[node.id] = result.exitCode === 0 ? 'running' : 'degraded'
-  currentSection.value = 'nodes'
-}
-
-async function handleUpgradeAgent(node: HysteriaNodeConfig) {
-  const result = await withBusyAction(
-    `agent-upgrade-${node.id}`,
-    () => performServiceAction('upgrade-agent', node.id),
-    `节点 ${node.name} 的 Agent 已升级`,
-  )
-  operationOutput.value = result
   currentSection.value = 'nodes'
 }
 
@@ -2766,6 +2762,8 @@ async function handleSendTestNotification() {
               <span>{{ node.host }}</span>
               <span>{{ node.listen_port }}/udp</span>
               <span>
+                {{ resolveNodeDeployLabel(node) }}
+                ·
                 {{ resolveNodeManageLabel(node) }}
                 ·
                 {{ node.domain || '未设置域名' }}
@@ -2795,14 +2793,6 @@ async function handleSendTestNotification() {
                   @click="handleRestartNode(node)"
                 >
                   重启
-                </button>
-                <button
-                  v-if="hasPermission('service.manage') && node.manage_mode === 'agent' && node.agent_enabled"
-                  class="secondary compact-button"
-                  :disabled="busyAction !== ''"
-                  @click="handleUpgradeAgent(node)"
-                >
-                  升级 Agent
                 </button>
                 <button
                   v-if="hasPermission('service.manage')"
@@ -3432,25 +3422,32 @@ async function handleSendTestNotification() {
             <input v-model="nodeForm.name" type="text" placeholder="default-node" />
           </label>
           <label class="form-field">
+            <span>部署位置</span>
+            <select v-model="nodeForm.deploy_mode">
+              <option value="ssh">远端服务器</option>
+              <option value="local">面板本机</option>
+            </select>
+          </label>
+          <label class="form-field">
             <span>服务器地址</span>
             <input v-model="nodeForm.host" type="text" placeholder="1.2.3.4 或 server.example.com" />
           </label>
-          <label class="form-field">
+          <label v-if="nodeForm.deploy_mode === 'ssh'" class="form-field">
             <span>SSH 端口</span>
             <input v-model.number="nodeForm.ssh_port" type="number" min="1" />
           </label>
-          <label class="form-field">
+          <label v-if="nodeForm.deploy_mode === 'ssh'" class="form-field">
             <span>SSH 用户</span>
             <input v-model="nodeForm.ssh_username" type="text" placeholder="root" />
           </label>
-          <label class="form-field">
+          <label v-if="nodeForm.deploy_mode === 'ssh'" class="form-field">
             <span>认证方式</span>
             <select v-model="nodeForm.ssh_auth_type">
               <option value="password">密码</option>
               <option value="key">私钥</option>
             </select>
           </label>
-          <label class="form-field password-field" v-if="nodeForm.ssh_auth_type === 'password'">
+          <label class="form-field password-field" v-if="nodeForm.deploy_mode === 'ssh' && nodeForm.ssh_auth_type === 'password'">
             <span>SSH 密码</span>
             <div class="password-control">
               <input v-model="nodeForm.ssh_password" class="password-input" :type="isPasswordVisible('nodeSsh') ? 'text' : 'password'" />
@@ -3474,7 +3471,7 @@ async function handleSendTestNotification() {
               </button>
             </div>
           </label>
-          <div v-else class="form-field key-upload-field">
+          <div v-if="nodeForm.deploy_mode === 'ssh' && nodeForm.ssh_auth_type === 'key'" class="form-field key-upload-field">
             <span>SSH 私钥</span>
             <div class="key-upload-panel">
               <input ref="nodePrivateKeyInput" class="key-upload-native" type="file" accept=".pem,.key,.rsa" @change="handleNodePrivateKeyFileChange" />

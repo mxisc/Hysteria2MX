@@ -29,6 +29,7 @@ type hysteriaService struct {
 type nodeRecord struct {
 	ID                           int64
 	CurrentNode                  int
+	DeployMode                   string
 	Name                         string
 	Host                         string
 	SSHPort                      int
@@ -152,7 +153,7 @@ func (s *hysteriaService) listNodesPageForUser(ctx context.Context, user *authUs
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, current_node, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path,
+		SELECT id, current_node, deploy_mode, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path,
 		       sudo_password, install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret,
 		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps,
 		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
@@ -231,13 +232,13 @@ func (s *hysteriaService) saveNode(ctx context.Context, payload map[string]any, 
 		}
 		_, err = s.db.ExecContext(ctx, `
 			UPDATE server_nodes SET
-				name=?, host=?, ssh_port=?, ssh_username=?, ssh_auth_type=?, ssh_password=?, ssh_private_key_path=?, sudo_password=?,
+				deploy_mode=?, name=?, host=?, ssh_port=?, ssh_username=?, ssh_auth_type=?, ssh_password=?, ssh_private_key_path=?, sudo_password=?,
 				install_script=?, service_name=?, config_path=?, listen_port=?, traffic_stats_listen=?, traffic_stats_secret=?, tls_mode=?,
 				tls_cert_path=?, tls_key_path=?, domain=?, acme_email=?, obfs_password=?, masquerade_url=?, bandwidth_up_mbps=?,
 				bandwidth_down_mbps=?, manage_mode=?, agent_enabled=?, agent_report_interval_seconds=?, agent_task_poll_interval_seconds=?,
 				agent_install_path=?, agent_config_path=?, agent_service_name=?
 			WHERE id=?`,
-			encrypted["name"], encrypted["host"], encrypted["ssh_port"], encrypted["ssh_username"], encrypted["ssh_auth_type"],
+			encrypted["deploy_mode"], encrypted["name"], encrypted["host"], encrypted["ssh_port"], encrypted["ssh_username"], encrypted["ssh_auth_type"],
 			encrypted["ssh_password"], encrypted["ssh_private_key_path"], encrypted["sudo_password"], encrypted["install_script"],
 			encrypted["service_name"], encrypted["config_path"], encrypted["listen_port"], encrypted["traffic_stats_listen"],
 			encrypted["traffic_stats_secret"], encrypted["tls_mode"], encrypted["tls_cert_path"], encrypted["tls_key_path"],
@@ -253,13 +254,13 @@ func (s *hysteriaService) saveNode(ctx context.Context, payload map[string]any, 
 
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO server_nodes (
-			name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path, sudo_password,
+			deploy_mode, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path, sudo_password,
 			install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret, tls_mode,
 			tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps, bandwidth_down_mbps,
 			manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds, agent_install_path,
 			agent_config_path, agent_service_name
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		encrypted["name"], encrypted["host"], encrypted["ssh_port"], encrypted["ssh_username"], encrypted["ssh_auth_type"],
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		encrypted["deploy_mode"], encrypted["name"], encrypted["host"], encrypted["ssh_port"], encrypted["ssh_username"], encrypted["ssh_auth_type"],
 		encrypted["ssh_password"], encrypted["ssh_private_key_path"], encrypted["sudo_password"], encrypted["install_script"], encrypted["service_name"],
 		encrypted["config_path"], encrypted["listen_port"], encrypted["traffic_stats_listen"], encrypted["traffic_stats_secret"], encrypted["tls_mode"],
 		encrypted["tls_cert_path"], encrypted["tls_key_path"], encrypted["domain"], encrypted["acme_email"], encrypted["obfs_password"],
@@ -1197,7 +1198,7 @@ func (s *hysteriaService) getUserMetricsForNode(ctx context.Context, nodeID int6
 
 func (s *hysteriaService) getStoredNode(ctx context.Context, id int64) (*nodeRecord, error) {
 	query := `
-		SELECT id, current_node, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path,
+		SELECT id, current_node, deploy_mode, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path,
 		       sudo_password, install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret,
 		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps,
 		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
@@ -1227,7 +1228,7 @@ func (s *hysteriaService) getStoredNode(ctx context.Context, id int64) (*nodeRec
 
 func (s *hysteriaService) listStoredNodes(ctx context.Context) ([]nodeRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, current_node, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path,
+		SELECT id, current_node, deploy_mode, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path,
 		       sudo_password, install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret,
 		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps,
 		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
@@ -1403,6 +1404,7 @@ func (s *hysteriaService) decryptNode(record nodeRecord) (map[string]any, error)
 	return map[string]any{
 		"id":                               record.ID,
 		"current_node":                     0,
+		"deploy_mode":                      normalizeDeployMode(record.DeployMode),
 		"name":                             record.Name,
 		"host":                             record.Host,
 		"ssh_port":                         record.SSHPort,
@@ -1472,6 +1474,7 @@ func (s *hysteriaService) normalizeNodePayload(payload map[string]any, current *
 
 	data := map[string]any{
 		"name":                             defaultString(toTrimmedString(payload["name"]), defaultString(toString(currentMap["name"]), "default-node")),
+		"deploy_mode":                      normalizeDeployMode(defaultString(toTrimmedString(payload["deploy_mode"]), defaultString(toString(currentMap["deploy_mode"]), "ssh"))),
 		"host":                             toTrimmedString(payload["host"]),
 		"ssh_port":                         boundedInt(payload["ssh_port"], 1, 65535, maxInt(intValue(currentMap["ssh_port"]), 22)),
 		"ssh_username":                     defaultString(toTrimmedString(payload["ssh_username"]), defaultString(toString(currentMap["ssh_username"]), "root")),
@@ -1515,7 +1518,14 @@ func (s *hysteriaService) normalizeNodePayload(payload map[string]any, current *
 		}
 	}
 
-	if data["ssh_auth_type"] == "key" {
+	if data["deploy_mode"] == "local" {
+		data["host"] = defaultString(toTrimmedString(payload["host"]), "127.0.0.1")
+		data["ssh_port"] = 22
+		data["ssh_username"] = defaultString(toTrimmedString(payload["ssh_username"]), "root")
+		data["ssh_auth_type"] = "password"
+		data["ssh_password"] = ""
+		data["ssh_private_key_path"] = ""
+	} else if data["ssh_auth_type"] == "key" {
 		if token := toTrimmedString(payload["ssh_private_key_token"]); token != "" {
 			if s.sshKeys == nil {
 				return nil, errors.New("SSH 密钥服务不可用")
@@ -1631,8 +1641,8 @@ func (s *hysteriaService) assertUniqueUserCredential(ctx context.Context, nodeID
 }
 
 func (s *hysteriaService) assertNodeIdentityAvailable(ctx context.Context, data map[string]any, ignoreNodeID int64) error {
-	query := `SELECT id FROM server_nodes WHERE deleted_at IS NULL AND host = ? AND ssh_port = ? AND ssh_username = ? AND listen_port = ?`
-	args := []any{data["host"], data["ssh_port"], data["ssh_username"], data["listen_port"]}
+	query := `SELECT id FROM server_nodes WHERE deleted_at IS NULL AND deploy_mode = ? AND host = ? AND ssh_port = ? AND ssh_username = ? AND listen_port = ?`
+	args := []any{data["deploy_mode"], data["host"], data["ssh_port"], data["ssh_username"], data["listen_port"]}
 	if ignoreNodeID > 0 {
 		query += ` AND id <> ?`
 		args = append(args, ignoreNodeID)
@@ -2645,6 +2655,29 @@ func (s *hysteriaService) buildAgentBinaryDownloadURL(panelAPIBaseURL string, ta
 	return strings.TrimRight(panelAPIBaseURL, "/") + "/agent/download/" + url.QueryEscape(target) + "?agent_id=" + url.QueryEscape(agentID) + "&expires=" + strconv.FormatInt(expiresAt, 10) + "&signature=" + url.QueryEscape(signature)
 }
 
+func (s *hysteriaService) buildAgentUpgradeInstruction(record map[string]any, payload map[string]any) map[string]any {
+	if s == nil || s.cfg == nil || s.agents == nil || record == nil {
+		return nil
+	}
+	currentVersion := strings.TrimSpace(toString(payload["version"]))
+	if currentVersion == "" || currentVersion == currentAgentVersion {
+		return nil
+	}
+	target := strings.TrimSpace(toString(payload["target"]))
+	if target != "linux-amd64" && target != "linux-arm64" {
+		return nil
+	}
+	apiBaseURL := normalizePublicAPIBaseURL(s.cfg.PublicAPIBaseURL)
+	if apiBaseURL == "" {
+		return nil
+	}
+	downloadURL := s.buildAgentBinaryDownloadURL(apiBaseURL, target, toString(record["agent_id"]), toString(record["shared_secret"]))
+	return map[string]any{
+		"version":      currentAgentVersion,
+		"download_url": downloadURL,
+	}
+}
+
 func (s *hysteriaService) buildUninstallCommand(node nodeRecord) string {
 	commands := []string{
 		"set -e",
@@ -2918,7 +2951,7 @@ func scanNodeRecord(scanner interface{ Scan(...any) error }) (nodeRecord, error)
 	var record nodeRecord
 	var agentEnabled int
 	err := scanner.Scan(
-		&record.ID, &record.CurrentNode, &record.Name, &record.Host, &record.SSHPort, &record.SSHUsername, &record.SSHAuthType,
+		&record.ID, &record.CurrentNode, &record.DeployMode, &record.Name, &record.Host, &record.SSHPort, &record.SSHUsername, &record.SSHAuthType,
 		&record.SSHPassword, &record.SSHPrivateKeyPath, &record.SudoPassword, &record.InstallScript, &record.ServiceName,
 		&record.ConfigPath, &record.ListenPort, &record.TrafficStatsListen, &record.TrafficStatsSecret, &record.TLSMode,
 		&record.TLSCertPath, &record.TLSKeyPath, &record.Domain, &record.ACMEEmail, &record.ObfsPassword, &record.MasqueradeURL,
@@ -2985,6 +3018,13 @@ func normalizeManageMode(value string) string {
 		return "ssh"
 	}
 	return "agent"
+}
+
+func normalizeDeployMode(value string) string {
+	if strings.TrimSpace(value) == "local" {
+		return "local"
+	}
+	return "ssh"
 }
 
 func normalizeSSHAuthType(value string) string {

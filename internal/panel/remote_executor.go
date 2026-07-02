@@ -24,6 +24,18 @@ func newRemoteExecutor() *remoteExecutor {
 }
 
 func (r *remoteExecutor) run(node nodeRecord, command string, displayCommand string) (map[string]any, error) {
+	if normalizeDeployMode(node.DeployMode) == "local" {
+		if strings.TrimSpace(displayCommand) == "" {
+			displayCommand = "local://panel " + command
+		}
+		output, exitCode, _ := runLocalCommand(command, 10*time.Minute)
+		return map[string]any{
+			"command":  r.sanitizeCommand(displayCommand),
+			"output":   output,
+			"exitCode": exitCode,
+		}, nil
+	}
+
 	client, err := r.connect(node)
 	if err != nil {
 		return nil, err

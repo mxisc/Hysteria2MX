@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	agentStatusPending = "pending"
-	agentStatusOnline  = "online"
-	agentStatusOffline = "offline"
-	agentStatusError   = "error"
+	agentStatusPending  = "pending"
+	agentStatusOnline   = "online"
+	agentStatusOffline  = "offline"
+	agentStatusError    = "error"
+	currentAgentVersion = "0.1.0"
 
 	taskStatusPending = "pending"
 	taskStatusRunning = "running"
