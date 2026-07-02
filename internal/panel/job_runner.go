@@ -3,11 +3,10 @@ package panel
 import (
 	"context"
 	"errors"
-	"log"
 	"strings"
 )
 
-func RunJob(config Config, logger *log.Logger, action string, jobID string) error {
+func RunJob(config Config, logger *PanelLogger, action string, jobID string) error {
 	action = strings.TrimSpace(action)
 	jobID = strings.TrimSpace(jobID)
 	if action == "" || jobID == "" {
@@ -65,7 +64,7 @@ func RunJob(config Config, logger *log.Logger, action string, jobID string) erro
 		return doneErr
 	}
 	if logger != nil {
-		logger.Printf("job %s %s completed", jobID, action)
+		logger.Infof("job %s %s completed", jobID, action)
 	}
 	return nil
 }

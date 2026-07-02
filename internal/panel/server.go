@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"io/fs"
-	"log"
 	"net/http"
 	"net/mail"
 	"net/url"
@@ -31,7 +30,7 @@ type apiEnvelope struct {
 
 type App struct {
 	config          *Config
-	logger          *log.Logger
+	logger          *PanelLogger
 	embeddedStatic  fs.FS
 	db              *sql.DB
 	auth            *authService
@@ -52,17 +51,18 @@ type App struct {
 
 const backgroundTrafficSyncInterval = 5 * time.Minute
 
-func NewServer(config Config, logger *log.Logger) (*http.Server, error) {
+func NewServer(config Config, logger *PanelLogger) (*http.Server, error) {
 	if logger == nil {
-		logger = log.New(os.Stdout, "", log.LstdFlags)
+		logger = NewPanelLogger(os.Stdout, "", LogFlags(), config.LogLevel)
 	}
+	logger.SetLevel(config.LogLevel)
 
 	var db *sql.DB
 	var err error
 	if config.IsConfigured() {
 		db, err = OpenDB(config)
 		if err != nil {
-			logger.Printf("open mysql failed: %v", err)
+			logger.Errorf("open mysql failed: %v", err)
 		} else if migrateErr := newMigrationService(config).ensureUpToDate(db); migrateErr != nil {
 			_ = db.Close()
 			return nil, migrateErr
@@ -184,7 +184,7 @@ func (a *App) syncTrafficUsageForAllNodes(ctx context.Context) {
 	nodes, err := a.hysteria.listStoredNodes(ctx)
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Printf("background traffic sync list nodes failed: %v", err)
+			a.logger.Errorf("background traffic sync list nodes failed: %v", err)
 		}
 		return
 	}
@@ -200,7 +200,7 @@ func (a *App) syncTrafficUsageForAllNodes(ctx context.Context) {
 		_, err := a.hysteria.syncTrafficUsage(syncCtx, true, node.ID)
 		cancel()
 		if err != nil && a.logger != nil {
-			a.logger.Printf("background traffic sync node %d failed: %v", node.ID, err)
+			a.logger.Errorf("background traffic sync node %d failed: %v", node.ID, err)
 		}
 	}
 }
@@ -468,7 +468,7 @@ func (a *App) handleAgentHeartbeat(writer http.ResponseWriter, request *http.Req
 	}
 	if a.hysteria != nil {
 		if quotaErr := a.hysteria.enforceRealtimeTrafficQuota(request.Context(), int64Value(payload["node_id"]), mapValue(payload["user_traffic"])); quotaErr != nil && a.logger != nil {
-			a.logger.Printf("agent heartbeat quota enforcement failed: %v", quotaErr)
+			a.logger.Errorf("agent heartbeat quota enforcement failed: %v", quotaErr)
 		}
 		if upgrade := a.hysteria.buildAgentUpgradeInstruction(record, payload); upgrade != nil {
 			result["upgrade"] = upgrade
@@ -536,7 +536,7 @@ func (a *App) writeAgentNodeDeleted(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	if err := a.agents.revokeAgentSecret(request.Context(), record, reason); err != nil && a.logger != nil {
-		a.logger.Printf("agent secret revoke failed after node deletion response: %v", err)
+		a.logger.Errorf("agent secret revoke failed after node deletion response: %v", err)
 	}
 }
 
@@ -1714,7 +1714,7 @@ func (a *App) writeJSON(writer http.ResponseWriter, status int, payload apiEnvel
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	writer.WriteHeader(status)
 	if err := json.NewEncoder(writer).Encode(payload); err != nil {
-		a.logger.Printf("write json: %v", err)
+		a.logger.Errorf("write json: %v", err)
 	}
 }
 
@@ -1997,7 +1997,7 @@ func (a *App) loggingMiddleware(next http.Handler) http.Handler {
 		startedAt := time.Now()
 		recorder := &statusRecorder{ResponseWriter: writer, status: http.StatusOK}
 		next.ServeHTTP(recorder, request)
-		a.logger.Printf("%s %s %d %s", request.Method, request.URL.Path, recorder.status, time.Since(startedAt).Round(time.Millisecond))
+		a.logger.Debugf("%s %s %d %s", request.Method, request.URL.Path, recorder.status, time.Since(startedAt).Round(time.Millisecond))
 	})
 }
 

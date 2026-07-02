@@ -26,6 +26,7 @@ type Config struct {
 	StaticDir               string
 	StaticDirSetting        string
 	Env                     string
+	LogLevel                string
 	SessionName             string
 	SiteTitle               string
 	SiteIconURL             string
@@ -66,18 +67,19 @@ func LoadConfig(configPath string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	staticDirSetting := strings.TrimSpace(envString(values, "PANEL_STATIC_DIR", defaultStaticDir))
+	staticDirSetting := strings.TrimSpace(envString(values, "STATIC_DIR", defaultStaticDir))
 
 	cfg := Config{
 		SourcePath:              configPath,
-		BindAddr:                envString(values, "PANEL_BIND_ADDR", DefaultBindAddr),
+		BindAddr:                envString(values, "BIND_ADDR", DefaultBindAddr),
 		StaticDir:               resolveStaticDir(configPath, staticDirSetting),
 		StaticDirSetting:        normalizeStaticDirSetting(staticDirSetting),
-		Env:                     envString(values, "PANEL_ENV", defaultEnv),
-		SessionName:             envString(values, "PANEL_SESSION_NAME", defaultSessionName),
+		Env:                     envString(values, "ENV", defaultEnv),
+		LogLevel:                NormalizeLogLevel(envString(values, "LOG_LEVEL", defaultLogLevel)),
+		SessionName:             envString(values, "SESSION_NAME", defaultSessionName),
 		SiteTitle:               "Hysteria2 Panel",
 		SiteIconURL:             "",
-		PublicAPIBaseURL:        envString(values, "PANEL_PUBLIC_API_BASE_URL", ""),
+		PublicAPIBaseURL:        envString(values, "PUBLIC_API_BASE_URL", ""),
 		MockPanel:               false,
 		MockNodeCount:           6,
 		MockUserCount:           32,
@@ -85,8 +87,8 @@ func LoadConfig(configPath string) (Config, error) {
 		MockDegradedNodeCount:   1,
 		MockStoppedNodeCount:    1,
 		MockSuspendedUserCount:  4,
-		EncryptionKey:           envString(values, "PANEL_ENCRYPTION_KEY", ""),
-		LoginAESSeed:            envString(values, "PANEL_LOGIN_AES_SEED", ""),
+		EncryptionKey:           envString(values, "ENCRYPTION_KEY", ""),
+		LoginAESSeed:            envString(values, "LOGIN_AES_SEED", ""),
 		BruteforceEnabled:       true,
 		BruteforceMaxAttempts:   5,
 		BruteforceWindowMinutes: 15,
@@ -190,17 +192,17 @@ func SaveConfigFile(path string, values map[string]string) error {
 
 func ConfigToEnvMap(cfg Config) map[string]string {
 	values := map[string]string{
-		"PANEL_ENCRYPTION_KEY": cfg.EncryptionKey,
-		"PANEL_LOGIN_AES_SEED": cfg.LoginAESSeed,
-		"DB_HOST":              cfg.DBHost,
-		"DB_NAME":              cfg.DBName,
-		"DB_USER":              cfg.DBUser,
+		"ENCRYPTION_KEY": cfg.EncryptionKey,
+		"LOGIN_AES_SEED": cfg.LoginAESSeed,
+		"DB_HOST":        cfg.DBHost,
+		"DB_NAME":        cfg.DBName,
+		"DB_USER":        cfg.DBUser,
 	}
 	if value := strings.TrimSpace(cfg.BindAddr); value != "" && value != DefaultBindAddr {
-		values["PANEL_BIND_ADDR"] = value
+		values["BIND_ADDR"] = value
 	}
 	if value := strings.TrimSpace(cfg.PublicAPIBaseURL); value != "" {
-		values["PANEL_PUBLIC_API_BASE_URL"] = value
+		values["PUBLIC_API_BASE_URL"] = value
 	}
 	if value := strings.TrimSpace(cfg.DBPassword); value != "" {
 		values["DB_PASSWORD"] = value
@@ -212,13 +214,16 @@ func ConfigToEnvMap(cfg Config) map[string]string {
 		values["DB_CHARSET"] = value
 	}
 	if value := strings.TrimSpace(cfg.Env); value != "" && value != defaultEnv {
-		values["PANEL_ENV"] = value
+		values["ENV"] = value
+	}
+	if value := NormalizeLogLevel(cfg.LogLevel); value != "" && value != defaultLogLevel {
+		values["LOG_LEVEL"] = value
 	}
 	if value := strings.TrimSpace(cfg.SessionName); value != "" && value != defaultSessionName {
-		values["PANEL_SESSION_NAME"] = value
+		values["SESSION_NAME"] = value
 	}
 	if value := stableStaticDirSetting(cfg); value != "" && value != defaultStaticDir {
-		values["PANEL_STATIC_DIR"] = value
+		values["STATIC_DIR"] = value
 	}
 	return values
 }

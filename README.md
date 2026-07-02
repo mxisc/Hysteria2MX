@@ -60,9 +60,10 @@ go build -o build/panel/mxinhy-panel ./cmd/mxinhy-panel
 最小配置示例见 `config/panel.env.example`：
 
 ```env
-PANEL_BIND_ADDR=127.0.0.1:18080
-PANEL_ENCRYPTION_KEY=change-this-to-a-random-secret
-PANEL_LOGIN_AES_SEED=change-this-to-a-random-seed
+BIND_ADDR=127.0.0.1:18080
+LOG_LEVEL=DEBUG
+ENCRYPTION_KEY=change-this-to-a-random-secret
+LOGIN_AES_SEED=change-this-to-a-random-seed
 
 DB_HOST=127.0.0.1
 DB_NAME=hy2_panel
@@ -142,7 +143,7 @@ storage/                运行时数据目录
 ## 安全说明
 
 - 不要将真实密钥、数据库密码、SSH 私钥、生产域名或服务器 IP 提交到仓库
-- `PANEL_ENCRYPTION_KEY` 和 `PANEL_LOGIN_AES_SEED` 生产环境必须改为随机值
+- `ENCRYPTION_KEY` 和 `LOGIN_AES_SEED` 生产环境必须改为随机值
 - 面板公网入口应使用 HTTPS，并只暴露反向代理后的服务
 - SSH 私钥应通过面板上传流程管理，不建议手动填写服务器本地路径
 - 面板返回给用户的错误信息应保持安全、简洁，不暴露内部路径、SQL 或堆栈信息
