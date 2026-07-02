@@ -1097,18 +1097,21 @@ func (s *hysteriaService) cachedServiceStatus(ctx context.Context, node nodeReco
 		}
 	}
 
-	status := toString(agent["last_service_status"])
+	agentStatus := toString(agent["status"])
+	serviceStatus := toString(agent["last_service_status"])
 	message := strings.TrimSpace(toString(agent["last_service_message"]))
 	if message == "" {
-		if toString(agent["status"]) == "online" {
+		if agentStatus == agentStatusOnline {
 			message = "Agent 已在线，但尚未回传详细状态"
 		} else {
 			message = "Agent 当前离线或未完成首次心跳"
 		}
+	} else if agentStatus != agentStatusOnline {
+		message = "Agent 当前离线或未完成首次心跳"
 	}
 
 	exitCode := 1
-	if status == "running" {
+	if agentStatus == agentStatusOnline && serviceStatus == "running" {
 		exitCode = 0
 	}
 
@@ -2409,16 +2412,20 @@ func (s *hysteriaService) buildAgentStatusResult(ctx context.Context, node nodeR
 		return map[string]any{"command": "agent:status", "output": "节点尚未部署 Agent，请先执行安装流程", "exitCode": 1}
 	}
 	agent := s.agents.presentAgent(record)
+	agentStatus := toString(agent["status"])
+	serviceStatus := toString(agent["last_service_status"])
 	message := toString(agent["last_service_message"])
 	if strings.TrimSpace(message) == "" {
-		if toString(agent["status"]) == agentStatusOnline {
+		if agentStatus == agentStatusOnline {
 			message = "Agent 已在线，但尚未回传详细状态"
 		} else {
 			message = "Agent 当前离线或未完成首次心跳"
 		}
+	} else if agentStatus != agentStatusOnline {
+		message = "Agent 当前离线或未完成首次心跳"
 	}
 	exitCode := 1
-	if toString(agent["last_service_status"]) == "running" {
+	if agentStatus == agentStatusOnline && serviceStatus == "running" {
 		exitCode = 0
 	}
 	return map[string]any{"command": "agent:status", "output": message, "exitCode": exitCode}
