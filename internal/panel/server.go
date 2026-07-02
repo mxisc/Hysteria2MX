@@ -435,6 +435,10 @@ func (a *App) handleAgentRegister(writer http.ResponseWriter, request *http.Requ
 		writeError(writer, http.StatusUnauthorized, "Agent 注册失败")
 		return
 	}
+	if boolValue(record["node_deleted"], false) {
+		a.writeAgentNodeDeleted(writer, request, record, "Agent 注册时发现节点已删除")
+		return
+	}
 	result, err := a.agents.register(request.Context(), record, payload, clientIP(request))
 	if err != nil {
 		writeError(writer, http.StatusUnauthorized, "Agent 注册失败")
@@ -451,6 +455,10 @@ func (a *App) handleAgentHeartbeat(writer http.ResponseWriter, request *http.Req
 	record, err := a.agents.authenticateRequest(request.Context(), request, rawBody)
 	if err != nil {
 		writeError(writer, http.StatusUnauthorized, "Agent 心跳失败")
+		return
+	}
+	if boolValue(record["node_deleted"], false) {
+		a.writeAgentNodeDeleted(writer, request, record, "Agent 心跳时发现节点已删除")
 		return
 	}
 	result, err := a.agents.heartbeat(request.Context(), record, payload, clientIP(request))
@@ -476,6 +484,10 @@ func (a *App) handleAgentPullTask(writer http.ResponseWriter, request *http.Requ
 		writeError(writer, http.StatusUnauthorized, "Agent 拉取任务失败")
 		return
 	}
+	if boolValue(record["node_deleted"], false) {
+		a.writeAgentNodeDeleted(writer, request, record, "Agent 拉取任务时发现节点已删除")
+		return
+	}
 	task, err := a.agents.pullTask(request.Context(), record)
 	if err != nil {
 		writeError(writer, http.StatusUnauthorized, "Agent 拉取任务失败")
@@ -498,6 +510,10 @@ func (a *App) handleAgentCompleteTask(writer http.ResponseWriter, request *http.
 		writeError(writer, http.StatusUnauthorized, "Agent 任务回传失败")
 		return
 	}
+	if boolValue(record["node_deleted"], false) {
+		a.writeAgentNodeDeleted(writer, request, record, "Agent 回传任务时发现节点已删除")
+		return
+	}
 	taskID, ok := parsePathIDWithSuffix(request.URL.Path, "/api/agent/tasks/", "/complete")
 	if !ok {
 		writeError(writer, http.StatusNotFound, "接口不存在")
@@ -509,6 +525,16 @@ func (a *App) handleAgentCompleteTask(writer http.ResponseWriter, request *http.
 		return
 	}
 	a.writeJSON(writer, http.StatusOK, apiEnvelope{Success: true, Data: result})
+}
+
+func (a *App) writeAgentNodeDeleted(writer http.ResponseWriter, request *http.Request, record map[string]any, reason string) {
+	writeError(writer, http.StatusGone, "节点已从面板删除，请卸载本机节点服务")
+	if a.agents == nil {
+		return
+	}
+	if err := a.agents.revokeAgentSecret(request.Context(), record, reason); err != nil && a.logger != nil {
+		a.logger.Printf("agent secret revoke failed after node deletion response: %v", err)
+	}
 }
 
 func (a *App) handleSetupStatus(writer http.ResponseWriter, request *http.Request) {
