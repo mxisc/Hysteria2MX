@@ -1525,6 +1525,7 @@ func (s *hysteriaService) normalizeNodePayload(payload map[string]any, current *
 		data["ssh_auth_type"] = "password"
 		data["ssh_password"] = ""
 		data["ssh_private_key_path"] = ""
+		data["sudo_password"] = ""
 	} else if data["ssh_auth_type"] == "key" {
 		if token := toTrimmedString(payload["ssh_private_key_token"]); token != "" {
 			if s.sshKeys == nil {
