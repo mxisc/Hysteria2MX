@@ -1143,10 +1143,11 @@ button {
 }
 
 .node-inline-table {
-  --node-inline-columns: minmax(140px, 1.1fr) 120px minmax(140px, 1fr) 110px minmax(180px, 1.2fr) minmax(260px, 1.8fr);
+  --node-inline-columns: minmax(130px, 0.9fr) 112px minmax(130px, 0.85fr) 96px minmax(300px, 2fr) minmax(320px, max-content);
   display: grid;
   gap: 12px;
   margin-top: 20px;
+  overflow-x: auto;
 }
 
 .node-inline-head,
@@ -1172,6 +1173,11 @@ button {
   background: var(--panel-bg-soft);
 }
 
+.node-inline-head > span,
+.node-inline-row > span {
+  min-width: 0;
+}
+
 .node-inline-name,
 .node-inline-actions,
 .subscription-panel,
@@ -1189,6 +1195,10 @@ button {
 
 .node-inline-status .user-status {
   display: inline-flex;
+}
+
+.node-inline-actions {
+  flex-wrap: nowrap;
 }
 
 .entity-main {
@@ -2623,6 +2633,10 @@ button {
   .audit-preview-row,
   .subscription-panel {
     justify-content: flex-start;
+  }
+
+  .node-inline-actions {
+    flex-wrap: wrap;
   }
 
   .table-actions,
