@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS admin_users (
 CREATE TABLE IF NOT EXISTS server_nodes (
     id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
     current_node TINYINT(1) NOT NULL DEFAULT 0,
+    deploy_mode ENUM('ssh', 'local') NOT NULL DEFAULT 'ssh',
     name VARCHAR(128) NOT NULL DEFAULT 'default-node',
     host VARCHAR(255) NOT NULL,
     ssh_port INT NOT NULL DEFAULT 22,

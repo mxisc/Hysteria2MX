@@ -4,6 +4,7 @@ export type ServiceAction = 'start' | 'stop' | 'restart' | 'status' | 'upgrade-a
 export type TlsMode = 'acme' | 'self_signed'
 export type AdminRole = 'super_admin' | 'operator' | 'auditor' | 'viewer'
 export type AdminStatus = 'active' | 'disabled'
+export type NodeDeployMode = 'ssh' | 'local'
 export type NodeManageMode = 'agent' | 'ssh'
 export type AgentStatus = 'pending' | 'online' | 'offline' | 'error'
 export type Permission =
@@ -83,6 +84,7 @@ export interface NodeAgentInfo {
 export interface HysteriaNodeConfig {
   id: number
   current_node: number
+  deploy_mode: NodeDeployMode
   name: string
   host: string
   ssh_port: number
@@ -123,6 +125,7 @@ export interface HysteriaNodeConfig {
 
 export interface HysteriaNodePayload {
   name: string
+  deploy_mode: NodeDeployMode
   host: string
   ssh_port: number
   ssh_username: string

@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -81,6 +82,7 @@ type registerPayload struct {
 type heartbeatPayload struct {
 	NodeID               int                       `json:"node_id"`
 	Version              string                    `json:"version"`
+	Target               string                    `json:"target"`
 	ServiceStatus        string                    `json:"service_status"`
 	ServiceMessageBase64 string                    `json:"service_message_base64"`
 	TotalRX              uint64                    `json:"total_rx"`
@@ -88,6 +90,16 @@ type heartbeatPayload struct {
 	UserCount            int                       `json:"user_count"`
 	OnlineCount          int                       `json:"online_count"`
 	UserTraffic          map[string]trafficCounter `json:"user_traffic"`
+}
+
+type heartbeatResponse struct {
+	Ok      bool              `json:"ok"`
+	Upgrade *agentUpgradeInfo `json:"upgrade"`
+}
+
+type agentUpgradeInfo struct {
+	Version     string `json:"version"`
+	DownloadURL string `json:"download_url"`
 }
 
 type pullTaskResponse struct {
@@ -426,6 +438,50 @@ func (a *agent) scheduleSelfUninstall(reason string) {
 	_, _ = runCommand(command)
 }
 
+func (a *agent) applySelfUpgrade(upgrade agentUpgradeInfo) error {
+	version := strings.TrimSpace(upgrade.Version)
+	if version == "" || version == agentVersion {
+		return nil
+	}
+	executablePath := strings.TrimSpace(a.cfg.AgentInstallPath)
+	if executablePath == "" {
+		return errors.New("agent executable path is empty")
+	}
+	response, err := a.client.Get(strings.TrimSpace(upgrade.DownloadURL))
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 400 {
+		body, _ := io.ReadAll(response.Body)
+		return fmt.Errorf("agent upgrade download failed: %s", strings.TrimSpace(string(body)))
+	}
+	tmpPath := executablePath + ".upgrade.tmp"
+	file, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(file, response.Body); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, executablePath); err != nil {
+		return err
+	}
+	writeLog("info", "agent upgraded to %s; restarting service", version)
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		_, _ = runCommand("systemctl restart " + shellQuote(a.cfg.AgentServiceName))
+	}()
+	return nil
+}
+
 func (a *agent) register() error {
 	payload := registerPayload{
 		NodeID:       a.cfg.NodeID,
@@ -441,6 +497,7 @@ func (a *agent) sendHeartbeat() error {
 	payload := heartbeatPayload{
 		NodeID:               a.cfg.NodeID,
 		Version:              agentVersion,
+		Target:               agentBinaryTarget(),
 		ServiceStatus:        summary.ServiceStatus,
 		ServiceMessageBase64: base64.StdEncoding.EncodeToString([]byte(summary.ServiceMessage)),
 		TotalRX:              summary.TotalRX,
@@ -450,7 +507,25 @@ func (a *agent) sendHeartbeat() error {
 		UserTraffic:          summary.UserTraffic,
 	}
 
-	return a.postJSON("/agent/heartbeat", payload, nil)
+	var response heartbeatResponse
+	if err := a.postJSON("/agent/heartbeat", payload, &response); err != nil {
+		return err
+	}
+	if response.Upgrade != nil && strings.TrimSpace(response.Upgrade.DownloadURL) != "" {
+		return a.applySelfUpgrade(*response.Upgrade)
+	}
+	return nil
+}
+
+func agentBinaryTarget() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "linux-amd64"
+	case "arm64":
+		return "linux-arm64"
+	default:
+		return ""
+	}
 }
 
 func (a *agent) processNextTask() error {
@@ -1212,6 +1287,15 @@ func (a *agent) postJSON(path string, payload interface{}, target interface{}) e
 	switch out := target.(type) {
 	case *pullTaskResponse:
 		var envelope apiEnvelope[pullTaskResponse]
+		if err := json.Unmarshal(respBody, &envelope); err != nil {
+			return err
+		}
+		if !envelope.Success {
+			return errors.New(envelope.Message)
+		}
+		*out = envelope.Data
+	case *heartbeatResponse:
+		var envelope apiEnvelope[heartbeatResponse]
 		if err := json.Unmarshal(respBody, &envelope); err != nil {
 			return err
 		}
