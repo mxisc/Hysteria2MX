@@ -259,6 +259,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /api/users/grouped", a.handleLogicalUsers)
 	mux.HandleFunc("GET /api/users", a.handleUsers)
 	mux.HandleFunc("POST /api/users", a.handleCreateUser)
+	mux.HandleFunc("POST /api/users/", a.handleRefreshUserSubscription)
 	mux.HandleFunc("PUT /api/users/", a.handleUpdateUser)
 	mux.HandleFunc("DELETE /api/users/", a.handleDeleteUser)
 	mux.HandleFunc("GET /api/users/", a.handleUserSubscriptionInfo)
@@ -1545,6 +1546,31 @@ func (a *App) handleUserSubscriptionInfo(writer http.ResponseWriter, request *ht
 		writeError(writer, http.StatusBadRequest, httpSafeError(err, "订阅信息读取失败"))
 		return
 	}
+	a.writeJSON(writer, http.StatusOK, apiEnvelope{Success: true, Data: result})
+}
+
+func (a *App) handleRefreshUserSubscription(writer http.ResponseWriter, request *http.Request) {
+	if !strings.HasSuffix(request.URL.Path, "/subscription-refresh") {
+		writeError(writer, http.StatusNotFound, "接口不存在")
+		return
+	}
+	user, ok := requireUser(request.Context(), a.auth, writer, request)
+	if !ok || !requirePermission(user, "user.manage", writer) {
+		return
+	}
+	id, ok := parsePathIDWithSuffix(request.URL.Path, "/api/users/", "/subscription-refresh")
+	if !ok {
+		writeError(writer, http.StatusNotFound, "接口不存在")
+		return
+	}
+	result, err := a.hysteria.refreshUserSubscription(request.Context(), id, resolvePublicSiteBaseURL(request, a.config))
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, httpSafeError(err, "订阅链接刷新失败"))
+		return
+	}
+	a.logAudit(request.Context(), user, request, "user.subscription.refresh", "user", strconv.FormatInt(id, 10), map[string]any{
+		"username": result["username"],
+	})
 	a.writeJSON(writer, http.StatusOK, apiEnvelope{Success: true, Data: result})
 }
 

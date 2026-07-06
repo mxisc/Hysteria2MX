@@ -30,6 +30,7 @@ import {
   fetchUserTrafficStats,
   fetchTrafficHistory,
   performServiceAction,
+  refreshUserSubscription,
   saveNodeConfig,
   syncTrafficUsage,
   sendTestNotification,
@@ -525,6 +526,7 @@ const showSubscriptionModal = ref(false)
 const qrModalTitle = ref('')
 const qrModalValue = ref('')
 const subscriptionInfo = ref<UserSubscriptionInfo | null>(null)
+const subscriptionUserId = ref<number | null>(null)
 const toastMessage = ref('')
 const toastType = ref<ToastType>('success')
 const selectedLogNodeId = ref<number | null>(null)
@@ -646,6 +648,7 @@ const auditActionLabelMap: Record<string, string> = {
   'system_settings.update': '更新系统配置',
   'user.create': '创建用户',
   'user.delete': '删除用户',
+  'user.subscription.refresh': '刷新订阅链接',
   'user.update': '更新用户',
 }
 
@@ -2221,6 +2224,7 @@ async function openSubscriptionModal(user: HysteriaUser) {
   try {
     const info = await fetchUserSubscriptionInfo(user.id)
     subscriptionInfo.value = info
+    subscriptionUserId.value = user.id
     qrModalTitle.value = `${info.username} · 订阅信息`
     qrModalValue.value = info.url
     showSubscriptionModal.value = true
@@ -2234,8 +2238,30 @@ async function openSubscriptionModal(user: HysteriaUser) {
 function closeSubscriptionModal() {
   showSubscriptionModal.value = false
   subscriptionInfo.value = null
+  subscriptionUserId.value = null
   qrModalTitle.value = ''
   qrModalValue.value = ''
+}
+
+async function handleRefreshSubscriptionLink() {
+  if (!subscriptionUserId.value || busyAction.value !== '') {
+    return
+  }
+  if (!window.confirm('刷新后旧订阅链接将失效，确认刷新？')) {
+    return
+  }
+  busyAction.value = 'subscription-refresh'
+  try {
+    const info = await refreshUserSubscription(subscriptionUserId.value)
+    subscriptionInfo.value = info
+    qrModalTitle.value = `${info.username} · 订阅信息`
+    qrModalValue.value = info.url
+    showToast('订阅链接已刷新', 'success')
+  } catch (error) {
+    showToast(getErrorMessage(error), 'error')
+  } finally {
+    busyAction.value = ''
+  }
 }
 
 function buildSystemSettingsPayload(): SystemSettings {
@@ -3838,6 +3864,14 @@ async function handleSendTestNotification() {
           </div>
           <div class="hero-actions">
             <button class="secondary" @click="copySubscriptionLink">复制链接</button>
+            <button
+              v-if="hasPermission('user.manage')"
+              class="secondary"
+              :disabled="busyAction !== ''"
+              @click="handleRefreshSubscriptionLink"
+            >
+              {{ busyAction === 'subscription-refresh' ? '刷新中...' : '刷新' }}
+            </button>
             <button class="secondary" @click="closeSubscriptionModal">关闭</button>
           </div>
         </div>

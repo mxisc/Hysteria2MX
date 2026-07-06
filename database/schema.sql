@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS hysteria_users (
     CONSTRAINT fk_hysteria_users_node FOREIGN KEY (node_id) REFERENCES server_nodes(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS hysteria_subscription_identities (
+    id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(64) NOT NULL,
+    public_id VARCHAR(64) NOT NULL,
+    token_secret VARCHAR(64) NOT NULL,
+    refreshed_at DATETIME NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_subscription_username (username),
+    UNIQUE KEY uniq_subscription_public_id (public_id)
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
     id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
     admin_id BIGINT UNSIGNED NULL,

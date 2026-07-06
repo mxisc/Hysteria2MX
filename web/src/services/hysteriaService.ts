@@ -515,6 +515,24 @@ export async function fetchUserSubscriptionInfo(id: number): Promise<UserSubscri
   return request<UserSubscriptionInfo>(`/users/${id}/subscription-info`)
 }
 
+export async function refreshUserSubscription(id: number): Promise<UserSubscriptionInfo> {
+  if (await shouldUseMockPanel()) {
+    return {
+      url: `${window.location.origin}/subscription/sub_mock_${id}?token=mock-refreshed-subscription-token`,
+      username: `mock-user-${id}`,
+      node_count: getMockNodes().length,
+      nodes: getMockNodes().map((node) => ({
+        id: node.id,
+        name: node.name,
+      })),
+    }
+  }
+  return request<UserSubscriptionInfo>(`/users/${id}/subscription-refresh`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+}
+
 export async function fetchSystemSettings(): Promise<SystemSettings> {
   return request<SystemSettings>('/system-settings')
 }

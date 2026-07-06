@@ -81,6 +81,16 @@ type userRecord struct {
 	UpdatedAt      time.Time
 }
 
+type subscriptionIdentity struct {
+	ID          int64
+	Username    string
+	PublicID    string
+	TokenSecret string
+	RefreshedAt sql.NullTime
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type subscriptionFormat string
 
 const (
@@ -676,6 +686,10 @@ func (s *hysteriaService) getUserSubscriptionInfo(ctx context.Context, id int64,
 	if len(entries) == 0 {
 		return nil, errors.New("当前用户没有可订阅的节点")
 	}
+	identity, err := s.ensureSubscriptionIdentity(ctx, decrypted.Username)
+	if err != nil {
+		return nil, err
+	}
 
 	nodes := make([]map[string]any, 0, len(entries))
 	for _, entry := range entries {
@@ -686,7 +700,7 @@ func (s *hysteriaService) getUserSubscriptionInfo(ctx context.Context, id int64,
 	}
 
 	return map[string]any{
-		"url":        s.buildUserSubscriptionURL(decrypted, apiBaseURL),
+		"url":        s.buildUserSubscriptionURL(identity, apiBaseURL),
 		"username":   decrypted.Username,
 		"node_count": len(entries),
 		"nodes":      nodes,
@@ -694,33 +708,57 @@ func (s *hysteriaService) getUserSubscriptionInfo(ctx context.Context, id int64,
 }
 
 func (s *hysteriaService) renderUserSubscription(ctx context.Context, publicID string, token string, format subscriptionFormat) (string, error) {
-	user, err := s.getStoredUserByPublicID(ctx, publicID)
+	identity, err := s.getSubscriptionIdentityByPublicID(ctx, publicID)
 	if err != nil {
 		return "", err
 	}
-	if user == nil {
-		return "", errors.New("订阅链接无效或已失效")
+	if identity != nil {
+		if s.buildSubscriptionIdentityToken(*identity) != strings.TrimSpace(token) {
+			return "", errors.New("订阅链接无效或已失效")
+		}
+		return s.renderSubscriptionForUsername(ctx, identity.Username, format)
 	}
 
-	decrypted, err := s.decryptUser(*user)
+	legacyUser, err := s.getStoredUserByPublicID(ctx, publicID)
 	if err != nil {
 		return "", err
 	}
-	if s.buildUserSubscriptionToken(decrypted) != strings.TrimSpace(token) {
+	if legacyUser == nil {
 		return "", errors.New("订阅链接无效或已失效")
 	}
 
-	if err := s.ensureSubscriptionUsersOnAvailableNodes(ctx, decrypted); err != nil {
+	decrypted, err := s.decryptUser(*legacyUser)
+	if err != nil {
 		return "", err
 	}
-	entries, err := s.resolveSubscriptionEntries(ctx, decrypted.Username)
+	legacyIdentity, err := s.ensureSubscriptionIdentity(ctx, decrypted.Username)
+	if err != nil {
+		return "", err
+	}
+	if s.subscriptionIdentityWasRefreshed(legacyIdentity) || s.buildLegacyUserSubscriptionToken(decrypted) != strings.TrimSpace(token) {
+		return "", errors.New("订阅链接无效或已失效")
+	}
+	return s.renderSubscriptionForUsername(ctx, decrypted.Username, format)
+}
+
+func (s *hysteriaService) renderSubscriptionForUsername(ctx context.Context, username string, format subscriptionFormat) (string, error) {
+	template, err := s.getSubscriptionTemplateUser(ctx, username)
+	if err != nil {
+		return "", err
+	}
+	if template == nil {
+		return "", errors.New("订阅链接无效或已失效")
+	}
+	if err := s.ensureSubscriptionUsersOnAvailableNodes(ctx, *template); err != nil {
+		return "", err
+	}
+	entries, err := s.resolveSubscriptionEntries(ctx, template.Username)
 	if err != nil {
 		return "", err
 	}
 	if len(entries) == 0 {
 		return "", errors.New("当前订阅暂无可用节点")
 	}
-
 	if format == subscriptionFormatClash {
 		return renderClashSubscriptionEntries(entries), nil
 	}
@@ -1321,6 +1359,94 @@ func (s *hysteriaService) getStoredUserByPublicID(ctx context.Context, publicID 
 	return &record, nil
 }
 
+func (s *hysteriaService) getSubscriptionTemplateUser(ctx context.Context, username string) (*userRecord, error) {
+	users, err := s.listStoredUsersByUsername(ctx, username)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range users {
+		decrypted, decryptErr := s.decryptUser(item)
+		if decryptErr != nil {
+			return nil, decryptErr
+		}
+		if isUserSubscribable(decrypted) {
+			return &decrypted, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *hysteriaService) getSubscriptionIdentityByPublicID(ctx context.Context, publicID string) (*subscriptionIdentity, error) {
+	publicID = strings.TrimSpace(publicID)
+	if publicID == "" {
+		return nil, nil
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, username, public_id, token_secret, refreshed_at, created_at, updated_at
+		FROM hysteria_subscription_identities WHERE public_id = ? LIMIT 1`, publicID)
+	identity, err := scanSubscriptionIdentity(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &identity, nil
+}
+
+func (s *hysteriaService) ensureSubscriptionIdentity(ctx context.Context, username string) (subscriptionIdentity, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return subscriptionIdentity{}, errors.New("用户名不能为空")
+	}
+	if identity, err := s.getSubscriptionIdentityByUsername(ctx, username); err != nil {
+		return subscriptionIdentity{}, err
+	} else if identity != nil {
+		return *identity, nil
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		publicID := s.generateSubscriptionPublicID(ctx)
+		tokenSecret, err := randomHex(16)
+		if err != nil {
+			return subscriptionIdentity{}, err
+		}
+		if _, err = s.db.ExecContext(ctx, `
+			INSERT INTO hysteria_subscription_identities (username, public_id, token_secret)
+			VALUES (?, ?, ?)`, username, publicID, tokenSecret); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+				continue
+			}
+			return subscriptionIdentity{}, err
+		}
+		identity, err := s.getSubscriptionIdentityByUsername(ctx, username)
+		if err != nil {
+			return subscriptionIdentity{}, err
+		}
+		if identity != nil {
+			return *identity, nil
+		}
+	}
+	return subscriptionIdentity{}, errors.New("订阅身份创建失败")
+}
+
+func (s *hysteriaService) getSubscriptionIdentityByUsername(ctx context.Context, username string) (*subscriptionIdentity, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil, nil
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, username, public_id, token_secret, refreshed_at, created_at, updated_at
+		FROM hysteria_subscription_identities WHERE username = ? LIMIT 1`, username)
+	identity, err := scanSubscriptionIdentity(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &identity, nil
+}
+
 func (s *hysteriaService) presentNode(ctx context.Context, record nodeRecord, canViewSensitive bool) (map[string]any, error) {
 	item, err := s.decryptNode(record)
 	if err != nil {
@@ -1765,7 +1891,34 @@ func (s *hysteriaService) resolveSubscriptionEntries(ctx context.Context, userna
 	return entries, nil
 }
 
-func (s *hysteriaService) buildUserSubscriptionURL(user userRecord, apiBaseURL string) string {
+func (s *hysteriaService) refreshUserSubscription(ctx context.Context, id int64, apiBaseURL string) (map[string]any, error) {
+	user, err := s.getStoredUser(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, errors.New("用户不存在")
+	}
+	decrypted, err := s.decryptUser(*user)
+	if err != nil {
+		return nil, err
+	}
+	identity, err := s.ensureSubscriptionIdentity(ctx, decrypted.Username)
+	if err != nil {
+		return nil, err
+	}
+	tokenSecret, err := randomHex(16)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE hysteria_subscription_identities SET token_secret = ?, refreshed_at = NOW() WHERE id = ?`, tokenSecret, identity.ID); err != nil {
+		return nil, err
+	}
+	return s.getUserSubscriptionInfo(ctx, id, apiBaseURL)
+}
+
+func (s *hysteriaService) buildUserSubscriptionURL(identity subscriptionIdentity, apiBaseURL string) string {
 	baseURL := normalizePublicSiteBaseURL(apiBaseURL)
 	if baseURL == "" && s.cfg != nil {
 		baseURL = normalizePublicSiteBaseURL(s.cfg.PublicAPIBaseURL)
@@ -1773,15 +1926,27 @@ func (s *hysteriaService) buildUserSubscriptionURL(user userRecord, apiBaseURL s
 	if baseURL == "" {
 		baseURL = "http://127.0.0.1"
 	}
-	return strings.TrimRight(baseURL, "/") + fmt.Sprintf("/subscription/%s?token=%s", url.PathEscape(user.PublicID), url.QueryEscape(s.buildUserSubscriptionToken(user)))
+	return strings.TrimRight(baseURL, "/") + fmt.Sprintf("/subscription/%s?token=%s", url.PathEscape(identity.PublicID), url.QueryEscape(s.buildSubscriptionIdentityToken(identity)))
 }
 
-func (s *hysteriaService) buildUserSubscriptionToken(user userRecord) string {
+func (s *hysteriaService) buildSubscriptionIdentityToken(identity subscriptionIdentity) string {
+	secret := ""
+	if s.cfg != nil {
+		secret = s.cfg.EncryptionKey
+	}
+	return signCookiePayload([]byte(fmt.Sprintf("subscription|%s|%s|%s", identity.PublicID, identity.Username, identity.TokenSecret)), secret)
+}
+
+func (s *hysteriaService) buildLegacyUserSubscriptionToken(user userRecord) string {
 	secret := ""
 	if s.cfg != nil {
 		secret = s.cfg.EncryptionKey
 	}
 	return signCookiePayload([]byte(fmt.Sprintf("subscription|%s|%s|%s|%s", user.PublicID, user.Username, user.AuthPassword, formatTime(user.UpdatedAt))), secret)
+}
+
+func (s *hysteriaService) subscriptionIdentityWasRefreshed(identity subscriptionIdentity) bool {
+	return identity.RefreshedAt.Valid
 }
 
 func (s *hysteriaService) generateUserPublicID(ctx context.Context) string {
@@ -1798,6 +1963,22 @@ func (s *hysteriaService) generateUserPublicID(ctx context.Context) string {
 		}
 	}
 	return "usr_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+func (s *hysteriaService) generateSubscriptionPublicID(ctx context.Context) string {
+	for attempt := 0; attempt < 8; attempt++ {
+		hexValue, err := randomHex(10)
+		if err != nil {
+			continue
+		}
+		value := "sub_" + hexValue
+		var exists int
+		err = s.db.QueryRowContext(ctx, `SELECT 1 FROM hysteria_subscription_identities WHERE public_id = ? LIMIT 1`, value).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return value
+		}
+	}
+	return "sub_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 }
 
 func (s *hysteriaService) canViewSensitiveFields(user *authUser) bool {
@@ -2968,6 +3149,12 @@ func scanUserRecord(scanner interface{ Scan(...any) error }) (userRecord, error)
 	var record userRecord
 	err := scanner.Scan(&record.ID, &record.PublicID, &record.NodeID, &record.Username, &record.AuthPassword, &record.Status, &record.QuotaGB, &record.UsedGB, &record.UsedBytes, &record.SpeedLimitMbps, &record.ExpiresAt, &record.CreatedAt, &record.UpdatedAt)
 	return record, err
+}
+
+func scanSubscriptionIdentity(scanner interface{ Scan(...any) error }) (subscriptionIdentity, error) {
+	var identity subscriptionIdentity
+	err := scanner.Scan(&identity.ID, &identity.Username, &identity.PublicID, &identity.TokenSecret, &identity.RefreshedAt, &identity.CreatedAt, &identity.UpdatedAt)
+	return identity, err
 }
 
 func uniqueTrimmedStrings(values []string) []string {
