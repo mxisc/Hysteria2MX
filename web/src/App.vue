@@ -2243,19 +2243,23 @@ function closeSubscriptionModal() {
   qrModalValue.value = ''
 }
 
-async function handleRefreshSubscriptionLink() {
-  if (!subscriptionUserId.value || busyAction.value !== '') {
+async function handleRefreshLogicalUserSubscription(group: HysteriaLogicalUser) {
+  const firstUser = group.details[0]
+  if (!firstUser || busyAction.value !== '') {
     return
   }
   if (!window.confirm('刷新后旧订阅链接将失效，确认刷新？')) {
     return
   }
-  busyAction.value = 'subscription-refresh'
+  const actionKey = `subscription-refresh-${group.username}`
+  busyAction.value = actionKey
   try {
-    const info = await refreshUserSubscription(subscriptionUserId.value)
-    subscriptionInfo.value = info
-    qrModalTitle.value = `${info.username} · 订阅信息`
-    qrModalValue.value = info.url
+    const info = await refreshUserSubscription(firstUser.id)
+    if (subscriptionUserId.value === firstUser.id) {
+      subscriptionInfo.value = info
+      qrModalTitle.value = `${info.username} · 订阅信息`
+      qrModalValue.value = info.url
+    }
     showToast('订阅链接已刷新', 'success')
   } catch (error) {
     showToast(getErrorMessage(error), 'error')
@@ -2917,6 +2921,14 @@ async function handleSendTestNotification() {
                   </span>
                   <span class="user-list-cell user-list-actions" data-label="操作" @click.stop>
                     <button class="secondary compact-button" :disabled="busyAction === 'user-subscription'" @click="handleOpenLogicalUserSubscription(group)">{{ busyAction === 'user-subscription' ? '加载中...' : '订阅信息' }}</button>
+                    <button
+                      v-if="hasPermission('user.manage')"
+                      class="secondary compact-button"
+                      :disabled="busyAction !== ''"
+                      @click="handleRefreshLogicalUserSubscription(group)"
+                    >
+                      {{ busyAction === `subscription-refresh-${group.username}` ? '刷新中...' : '刷新订阅' }}
+                    </button>
                     <button v-if="hasPermission('user.manage')" class="secondary compact-button" @click="handleEditLogicalUser(group)">编辑</button>
                     <button v-if="hasPermission('user.manage')" class="secondary compact-button danger-button" @click="handleDeleteLogicalUser(group)">删除</button>
                   </span>
@@ -3864,14 +3876,6 @@ async function handleSendTestNotification() {
           </div>
           <div class="hero-actions">
             <button class="secondary" @click="copySubscriptionLink">复制链接</button>
-            <button
-              v-if="hasPermission('user.manage')"
-              class="secondary"
-              :disabled="busyAction !== ''"
-              @click="handleRefreshSubscriptionLink"
-            >
-              {{ busyAction === 'subscription-refresh' ? '刷新中...' : '刷新' }}
-            </button>
             <button class="secondary" @click="closeSubscriptionModal">关闭</button>
           </div>
         </div>
