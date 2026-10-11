@@ -3607,8 +3607,10 @@ async function handleSendTestNotification() {
           </label>
         </div>
 
-        <NodeObfsSettings v-model:enabled="nodeForm.obfs_enabled" v-model:password="nodeForm.obfs_password" />
-        <NodeLossCompensation v-model="nodeForm.disable_loss_compensation" />
+        <div class="node-feature-switches">
+          <NodeObfsSettings v-model:enabled="nodeForm.obfs_enabled" v-model:password="nodeForm.obfs_password" />
+          <NodeLossCompensation v-model="nodeForm.disable_loss_compensation" />
+        </div>
 
         <div class="advanced-toggle-wrap">
           <button class="secondary advanced-toggle-button" :disabled="busyAction === 'node-save'" @click="showNodeAdvancedOptions = !showNodeAdvancedOptions">
@@ -3904,3 +3906,7 @@ async function handleSendTestNotification() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.node-feature-switches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:18px 0}.node-feature-switches :deep(.obfs-settings-head){gap:10px}.node-feature-switches :deep(.obfs-settings-icon){width:34px;height:34px}.node-feature-switches :deep(.obfs-settings-copy){min-width:0}@media(max-width:480px){.node-feature-switches{gap:8px}.node-feature-switches :deep(.obfs-settings){padding:12px 10px}.node-feature-switches :deep(.obfs-settings-icon){display:none}.node-feature-switches :deep(.obfs-settings-copy strong){font-size:12px}}
+</style>
