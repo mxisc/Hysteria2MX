@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS server_nodes (
     acme_email VARCHAR(255) NOT NULL,
     obfs_password VARCHAR(255) NOT NULL,
     obfs_enabled TINYINT(1) NOT NULL DEFAULT 1,
+    disable_loss_compensation TINYINT(1) NOT NULL DEFAULT 0,
     masquerade_url VARCHAR(255) NOT NULL DEFAULT 'https://www.cloudflare.com',
     bandwidth_up_mbps INT NOT NULL DEFAULT 200,
     bandwidth_down_mbps INT NOT NULL DEFAULT 200,

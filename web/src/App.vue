@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import NodeMonitor from './components/NodeMonitor.vue'
+import NodeLossCompensation from './components/NodeLossCompensation.vue'
 import NodeObfsSettings from './components/NodeObfsSettings.vue'
 import CPUProtectionDialog from './components/CPUProtectionDialog.vue'
 import { LineChart } from 'echarts/charts'
@@ -195,6 +196,7 @@ function createEmptyNodeForm(): HysteriaNodePayload {
     obfs_password: createDefaultObfsPassword(),
     obfs_enabled: true,
     masquerade_url: 'https://www.bing.com',
+    disable_loss_compensation: false,
     bandwidth_up_mbps: 200,
     bandwidth_down_mbps: 200,
     manage_mode: 'agent',
@@ -236,6 +238,7 @@ function mapNodeToForm(node: HysteriaNodeConfig): HysteriaNodePayload {
     obfs_password: node.obfs_password,
     obfs_enabled: node.obfs_enabled,
     masquerade_url: node.masquerade_url,
+    disable_loss_compensation: Boolean(node.disable_loss_compensation),
     bandwidth_up_mbps: Number(node.bandwidth_up_mbps),
     bandwidth_down_mbps: Number(node.bandwidth_down_mbps),
     manage_mode: node.manage_mode,
@@ -3605,6 +3608,7 @@ async function handleSendTestNotification() {
         </div>
 
         <NodeObfsSettings v-model:enabled="nodeForm.obfs_enabled" v-model:password="nodeForm.obfs_password" />
+        <NodeLossCompensation v-model="nodeForm.disable_loss_compensation" />
 
         <div class="advanced-toggle-wrap">
           <button class="secondary advanced-toggle-button" :disabled="busyAction === 'node-save'" @click="showNodeAdvancedOptions = !showNodeAdvancedOptions">
