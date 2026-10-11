@@ -31,6 +31,7 @@ type Config struct {
 	SiteTitle               string
 	SiteIconURL             string
 	PublicAPIBaseURL        string
+	ObfsDisabledNodeIDs     string
 	MockPanel               bool
 	MockNodeCount           int
 	MockUserCount           int
@@ -80,6 +81,7 @@ func LoadConfig(configPath string) (Config, error) {
 		SiteTitle:               "Hysteria2 Panel",
 		SiteIconURL:             "",
 		PublicAPIBaseURL:        envString(values, "PUBLIC_API_BASE_URL", ""),
+		ObfsDisabledNodeIDs:     envString(values, "HYSTERIA_OBFS_DISABLED_NODES", ""),
 		MockPanel:               false,
 		MockNodeCount:           6,
 		MockUserCount:           32,
@@ -204,6 +206,9 @@ func ConfigToEnvMap(cfg Config) map[string]string {
 	if value := strings.TrimSpace(cfg.PublicAPIBaseURL); value != "" {
 		values["PUBLIC_API_BASE_URL"] = value
 	}
+	if value := strings.TrimSpace(cfg.ObfsDisabledNodeIDs); value != "" {
+		values["HYSTERIA_OBFS_DISABLED_NODES"] = value
+	}
 	if value := strings.TrimSpace(cfg.DBPassword); value != "" {
 		values["DB_PASSWORD"] = value
 	}
@@ -226,6 +231,16 @@ func ConfigToEnvMap(cfg Config) map[string]string {
 		values["STATIC_DIR"] = value
 	}
 	return values
+}
+
+func (c Config) nodeObfsDisabled(nodeID int64) bool {
+	for _, value := range strings.Split(c.ObfsDisabledNodeIDs, ",") {
+		id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err == nil && id > 0 && id == nodeID {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveStaticDir(configPath string, staticDir string) string {
