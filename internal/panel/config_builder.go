@@ -49,13 +49,15 @@ func buildHysteriaConfig(node nodeRecord, users []userRecord, authURL string) st
 		trafficBlock = fmt.Sprintf("trafficStats:\n  listen: %s\n  secret: %s", trafficListen, trafficSecret)
 	}
 
+	obfsBlock := ""
+	if !node.ObfsDisabled {
+		obfsBlock = fmt.Sprintf("obfs:\n  type: salamander\n  salamander:\n    password: %s", node.ObfsPassword)
+	}
+
 	return fmt.Sprintf(`listen: :%d
 %s
 %s
-obfs:
-  type: salamander
-  salamander:
-    password: %s
+%s
 masquerade:
   type: proxy
   proxy:
@@ -66,7 +68,7 @@ bandwidth:
   down: %d mbps
 ignoreClientBandwidth: false
 %s
-`, node.ListenPort, tlsBlock, authBlock, node.ObfsPassword, node.MasqueradeURL, node.BandwidthUpMbps, node.BandwidthDownMbps, trafficBlock)
+`, node.ListenPort, tlsBlock, authBlock, obfsBlock, node.MasqueradeURL, node.BandwidthUpMbps, node.BandwidthDownMbps, trafficBlock)
 }
 
 func buildDisabledUserpassBlock(node nodeRecord) string {

@@ -50,6 +50,7 @@ type nodeRecord struct {
 	Domain                       string
 	ACMEEmail                    string
 	ObfsPassword                 string
+	ObfsDisabled                 bool
 	MasqueradeURL                string
 	BandwidthUpMbps              int
 	BandwidthDownMbps            int
@@ -791,7 +792,7 @@ func renderClashSubscriptionEntries(entries []subscriptionEntry) string {
 		if strings.TrimSpace(entry.Node.Domain) != "" {
 			builder.WriteString("    sni: " + yamlQuote(strings.TrimSpace(entry.Node.Domain)) + "\n")
 		}
-		if strings.TrimSpace(entry.Node.ObfsPassword) != "" {
+		if !entry.Node.ObfsDisabled && strings.TrimSpace(entry.Node.ObfsPassword) != "" {
 			builder.WriteString("    obfs: salamander\n")
 			builder.WriteString("    obfs-password: " + yamlQuote(entry.Node.ObfsPassword) + "\n")
 		}
@@ -1311,6 +1312,7 @@ func (s *hysteriaService) decryptStoredNodeSecrets(record *nodeRecord) error {
 	if record == nil || s == nil || s.cfg == nil {
 		return nil
 	}
+	record.ObfsDisabled = s.cfg.nodeObfsDisabled(record.ID)
 	var err error
 	if record.SSHPassword, err = DecryptValue(record.SSHPassword, *s.cfg); err != nil {
 		return err
@@ -3080,7 +3082,7 @@ func buildConnectionURIForNodeUser(node nodeRecord, user userRecord) string {
 	} else if strings.TrimSpace(node.Domain) != "" {
 		params.Set("sni", node.Domain)
 	}
-	if strings.TrimSpace(user.AuthPassword) != "" && strings.TrimSpace(node.ObfsPassword) != "" {
+	if !node.ObfsDisabled && strings.TrimSpace(user.AuthPassword) != "" && strings.TrimSpace(node.ObfsPassword) != "" {
 		params.Set("obfs", "salamander")
 		params.Set("obfs-password", node.ObfsPassword)
 	}
