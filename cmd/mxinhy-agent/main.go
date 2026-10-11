@@ -25,7 +25,7 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.0"
+const agentVersion = "0.1.1"
 const logDir = "/var/log/mxinhy-agent"
 const agentLogPath = logDir + "/agent.log"
 const hysteriaLogPath = logDir + "/hysteria.log"
@@ -36,21 +36,22 @@ const defaultLocalAuthStatePath = "/var/lib/mxinhy-agent/local-auth.json"
 var errNodeDeleted = errors.New("node deleted by panel")
 
 type config struct {
-	NodeID                  int    `json:"node_id"`
-	AgentID                 string `json:"agent_id"`
-	AgentSecret             string `json:"agent_secret"`
-	PanelAPIBaseURL         string `json:"panel_api_base_url"`
-	ServiceName             string `json:"service_name"`
-	ConfigPath              string `json:"config_path"`
-	TrafficStatsListen      string `json:"traffic_stats_listen"`
-	TrafficStatsSecret      string `json:"traffic_stats_secret"`
-	LocalAuthListen         string `json:"local_auth_listen"`
-	LocalAuthStatePath      string `json:"local_auth_state_path"`
-	ReportIntervalSeconds   int    `json:"report_interval_seconds"`
-	TaskPollIntervalSeconds int    `json:"task_poll_interval_seconds"`
-	AgentServiceName        string `json:"agent_service_name"`
-	AgentConfigPath         string `json:"-"`
-	AgentInstallPath        string `json:"-"`
+	CPUProtection           cpuProtectionConfig `json:"cpu_protection"`
+	NodeID                  int                 `json:"node_id"`
+	AgentID                 string              `json:"agent_id"`
+	AgentSecret             string              `json:"agent_secret"`
+	PanelAPIBaseURL         string              `json:"panel_api_base_url"`
+	ServiceName             string              `json:"service_name"`
+	ConfigPath              string              `json:"config_path"`
+	TrafficStatsListen      string              `json:"traffic_stats_listen"`
+	TrafficStatsSecret      string              `json:"traffic_stats_secret"`
+	LocalAuthListen         string              `json:"local_auth_listen"`
+	LocalAuthStatePath      string              `json:"local_auth_state_path"`
+	ReportIntervalSeconds   int                 `json:"report_interval_seconds"`
+	TaskPollIntervalSeconds int                 `json:"task_poll_interval_seconds"`
+	AgentServiceName        string              `json:"agent_service_name"`
+	AgentConfigPath         string              `json:"-"`
+	AgentInstallPath        string              `json:"-"`
 }
 
 type localAuthUser struct {
@@ -204,6 +205,9 @@ func main() {
 		fatal(err)
 	}
 	if err := a.startLocalAuthServer(); err != nil {
+		fatal(err)
+	}
+	if err := a.startCPUProtection(); err != nil {
 		fatal(err)
 	}
 	if err := a.run(); err != nil {
