@@ -1,4 +1,6 @@
 import type {
+  CPUProtectionConfig,
+  CPUProtectionState,
   AdminUser,
   AdminUserPayload,
   AuditLogItem,
@@ -38,6 +40,23 @@ import {
 } from './mockPanelData'
 
 const API_BASE = '/api'
+
+const mockCPUProtection = new Map<number, CPUProtectionConfig>()
+export async function fetchCPUProtection(nodeId: number): Promise<CPUProtectionState> {
+  if (await shouldUseMockPanel()) {
+    const config = mockCPUProtection.get(nodeId)
+    return { config: config ?? { enabled: false, high_percent: 90, low_percent: 70, max_quota_percent: 80, min_quota_percent: 20 }, configured: Boolean(config), applied: Boolean(config) }
+  }
+  return request<CPUProtectionState>(`/nodes/${nodeId}/cpu-protection`)
+}
+
+export async function saveCPUProtection(nodeId: number, config: CPUProtectionConfig): Promise<CPUProtectionState> {
+  if (await shouldUseMockPanel()) {
+    mockCPUProtection.set(nodeId, { ...config })
+    return { config: { ...config }, configured: true, applied: true }
+  }
+  return request<CPUProtectionState>(`/nodes/${nodeId}/cpu-protection`, { method: 'PUT', body: JSON.stringify(config) })
+}
 
 type ApiEnvelope<T> = {
   success: boolean

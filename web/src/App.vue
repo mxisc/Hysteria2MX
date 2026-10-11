@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CPUProtectionDialog from './components/CPUProtectionDialog.vue'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { init, use } from 'echarts/core'
@@ -513,6 +514,7 @@ const operationOutput = ref<RemoteCommandResult | null>(null)
 const nodeKeyUploading = ref(false)
 const editingUserId = ref<number | null>(null)
 const editingNodeId = ref<number | null>(null)
+const cpuProtectionNode = ref<HysteriaNodeConfig | null>(null)
 const editingAdminId = ref<number | null>(null)
 const showNodeModal = ref(false)
 const showUserModal = ref(false)
@@ -2808,6 +2810,7 @@ async function handleSendTestNotification() {
               </span>
               <span class="node-inline-actions">
                 <button v-if="hasPermission('node.manage')" class="secondary compact-button" @click="handleEditNode(node)">编辑</button>
+                <button v-if="hasPermission('node.manage') && node.agent_enabled" class="secondary compact-button" @click="cpuProtectionNode = node">CPU保护</button>
                 <button
                   v-if="hasPermission('service.manage')"
                   class="secondary compact-button"
@@ -3440,6 +3443,7 @@ async function handleSendTestNotification() {
       </section>
     </main>
 
+    <CPUProtectionDialog v-if="cpuProtectionNode" :node-id="cpuProtectionNode.id" :node-name="cpuProtectionNode.name" @close="cpuProtectionNode = null" />
     <div v-if="showNodeModal" class="modal-overlay">
       <section class="modal-card">
         <div class="section-head section-head-wrap">

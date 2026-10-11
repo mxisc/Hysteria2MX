@@ -25,7 +25,7 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.1"
+const agentVersion = "0.1.3"
 const logDir = "/var/log/mxinhy-agent"
 const agentLogPath = logDir + "/agent.log"
 const hysteriaLogPath = logDir + "/hysteria.log"
@@ -81,6 +81,7 @@ type registerPayload struct {
 }
 
 type heartbeatPayload struct {
+	CPUProtection        cpuProtectionConfig       `json:"cpu_protection"`
 	NodeID               int                       `json:"node_id"`
 	Version              string                    `json:"version"`
 	Target               string                    `json:"target"`
@@ -94,8 +95,9 @@ type heartbeatPayload struct {
 }
 
 type heartbeatResponse struct {
-	Ok      bool              `json:"ok"`
-	Upgrade *agentUpgradeInfo `json:"upgrade"`
+	CPUProtection *cpuProtectionConfig `json:"cpu_protection,omitempty"`
+	Ok            bool                 `json:"ok"`
+	Upgrade       *agentUpgradeInfo    `json:"upgrade"`
 }
 
 type agentUpgradeInfo struct {
@@ -146,14 +148,17 @@ type taskCompletePayload struct {
 }
 
 type agent struct {
-	cfg    config
-	client *http.Client
+	cpuGuardCancel context.CancelFunc
+	cpuGuardDone   chan struct{}
+	cfg            config
+	client         *http.Client
 
 	mu                   sync.Mutex
 	registered           bool
 	lastHeartbeatSuccess time.Time
 	heartbeatGuardActive bool
 	selfUninstalling     bool
+	selfUpgrading        bool
 
 	authMu                 sync.RWMutex
 	localAuthUsers         map[string]localAuthUser
@@ -451,7 +456,9 @@ func (a *agent) applySelfUpgrade(upgrade agentUpgradeInfo) error {
 	if executablePath == "" {
 		return errors.New("agent executable path is empty")
 	}
-	response, err := a.client.Get(strings.TrimSpace(upgrade.DownloadURL))
+	// Binary downloads can take much longer than a control-plane request.
+	downloadClient := &http.Client{Transport: a.client.Transport, Timeout: 5 * time.Minute}
+	response, err := downloadClient.Get(strings.TrimSpace(upgrade.DownloadURL))
 	if err != nil {
 		return err
 	}
@@ -499,6 +506,7 @@ func (a *agent) register() error {
 func (a *agent) sendHeartbeat() error {
 	summary := a.collectHeartbeatSummary()
 	payload := heartbeatPayload{
+		CPUProtection:        a.cfg.CPUProtection,
 		NodeID:               a.cfg.NodeID,
 		Version:              agentVersion,
 		Target:               agentBinaryTarget(),
@@ -516,9 +524,35 @@ func (a *agent) sendHeartbeat() error {
 		return err
 	}
 	if response.Upgrade != nil && strings.TrimSpace(response.Upgrade.DownloadURL) != "" {
-		return a.applySelfUpgrade(*response.Upgrade)
+		a.scheduleSelfUpgrade(*response.Upgrade)
+	}
+	if response.CPUProtection != nil {
+		return a.updateCPUProtection(*response.CPUProtection)
 	}
 	return nil
+}
+
+func (a *agent) scheduleSelfUpgrade(upgrade agentUpgradeInfo) {
+	upgrade.Version = strings.TrimSpace(upgrade.Version)
+	if upgrade.Version == "" || upgrade.Version == agentVersion {
+		return
+	}
+	a.mu.Lock()
+	if a.selfUpgrading || a.selfUninstalling {
+		a.mu.Unlock()
+		return
+	}
+	a.selfUpgrading = true
+	a.mu.Unlock()
+	go func() {
+		if err := a.applySelfUpgrade(upgrade); err != nil {
+			writeLog("warn", "agent upgrade failed; continuing heartbeat and configuration synchronization")
+			a.mu.Lock()
+			a.selfUpgrading = false
+			a.mu.Unlock()
+		}
+		// Successful replacement leaves this flag set until the scheduled restart.
+	}()
 }
 
 func agentBinaryTarget() string {

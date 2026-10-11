@@ -20,7 +20,7 @@ const (
 	agentStatusOnline   = "online"
 	agentStatusOffline  = "offline"
 	agentStatusError    = "error"
-	currentAgentVersion = "0.1.1"
+	currentAgentVersion = "0.1.3"
 
 	taskStatusPending = "pending"
 	taskStatusRunning = "running"
@@ -171,6 +171,10 @@ func (s *agentService) presentAgent(record map[string]any) map[string]any {
 }
 
 func (s *agentService) buildBootstrapConfig(ctx context.Context, node nodeRecord, panelAPIBaseURL string) (map[string]any, error) {
+	protection, err := s.cpuProtection(ctx, node.ID)
+	if err != nil {
+		return nil, err
+	}
 	record, err := s.ensureAgentRecordForNode(ctx, node)
 	if err != nil {
 		return nil, err
@@ -180,6 +184,7 @@ func (s *agentService) buildBootstrapConfig(ctx context.Context, node nodeRecord
 		trafficSecret = node.ObfsPassword
 	}
 	return map[string]any{
+		"cpu_protection":             protection,
 		"agent_id":                   record["agent_id"],
 		"agent_secret":               record["shared_secret"],
 		"report_interval_seconds":    record["report_interval_seconds"],

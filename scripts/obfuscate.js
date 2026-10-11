@@ -1,9 +1,10 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import JavaScriptObfuscator from 'javascript-obfuscator'
 
-const ASSETS_DIR = new URL('../public/assets', import.meta.url).pathname
-const INDEX_HTML = new URL('../public/index.html', import.meta.url).pathname
+const ASSETS_DIR = fileURLToPath(new URL('../public/assets', import.meta.url))
+const INDEX_HTML = fileURLToPath(new URL('../public/index.html', import.meta.url))
 const indexHtml = readFileSync(INDEX_HTML, 'utf-8')
 const files = [...indexHtml.matchAll(/\/assets\/([^"'?#]+\.js)\b/g)].map((match) => match[1])
 
