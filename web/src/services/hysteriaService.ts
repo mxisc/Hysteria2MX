@@ -629,3 +629,5 @@ export async function fetchNodeMonitor(nodeId: number, range: string, signal?: A
   }
   return request<NodeMonitorData>(`/nodes/${nodeId}/monitor?range=${encodeURIComponent(range)}`, { signal })
 }
+
+export function fetchNodeSecret(id:number,field:string):Promise<{value:string}>{return request(`/nodes/${id}/secret?field=${encodeURIComponent(field)}`)}

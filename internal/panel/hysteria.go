@@ -1464,6 +1464,7 @@ func (s *hysteriaService) presentNode(ctx context.Context, record nodeRecord, ca
 		keyMetadata = s.sshKeys.describe(item["ssh_private_key_path"].(string))
 	}
 
+	maskNodeSecrets(item)
 	item["ssh_password"] = ""
 	item["ssh_private_key_path"] = ""
 	item["ssh_private_key_uploaded"] = keyMetadata["uploaded"]

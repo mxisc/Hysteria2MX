@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import NodeMonitor from './components/NodeMonitor.vue'
 import NodeLossCompensation from './components/NodeLossCompensation.vue'
+import NodeRadioGroup from './components/NodeRadioGroup.vue'
+import ToggleSwitch from './components/ToggleSwitch.vue'
 import NodeObfsSettings from './components/NodeObfsSettings.vue'
 import CPUProtectionDialog from './components/CPUProtectionDialog.vue'
 import { LineChart } from 'echarts/charts'
@@ -17,6 +19,7 @@ import {
   fetchAdmins,
   fetchNotificationSettings,
   fetchNodes,
+  fetchNodeSecret,
   fetchOnlineClientPage,
   createNodeWithInstall,
   createUser,
@@ -334,7 +337,25 @@ function isPasswordVisible(key: string): boolean {
   return Boolean(passwordVisibility.value[key])
 }
 
-function togglePasswordVisibility(key: string): void {
+const nodeSecretLoading=ref<Record<string,boolean>>({})
+async function revealNodeObfs(){
+ if(!editingNodeId.value||nodeForm.value.obfs_password||!nodeSecretSaved('obfs_password'))return
+ const id=editingNodeId.value
+ try{const result=await fetchNodeSecret(id,'obfs_password');if(editingNodeId.value===id&&showNodeModal.value&&!nodeForm.value.obfs_password)nodeForm.value.obfs_password=result.value}catch{showToast('密码读取失败，请重试','error')}
+}
+function nodeSecretSaved(field:string):boolean{return Boolean(nodes.value.find(n=>n.id===editingNodeId.value)?.[`${field}_saved` as keyof HysteriaNodeConfig])}
+async function togglePasswordVisibility(key: string): Promise<void> {
+ const fields:Record<string,string>={nodeSsh:'ssh_password',nodeSudo:'sudo_password',nodeTrafficSecret:'traffic_stats_secret'}
+ const field=fields[key]
+ if(field && !isPasswordVisible(key) && editingNodeId.value && nodeSecretSaved(field) && !(nodeForm.value as any)[field]){
+  if(nodeSecretLoading.value[key])return
+  nodeSecretLoading.value[key]=true
+  const id=editingNodeId.value
+  try{const result=await fetchNodeSecret(id,field);if(editingNodeId.value!==id||!showNodeModal.value)return;if(!(nodeForm.value as any)[field])(nodeForm.value as any)[field]=result.value}
+  catch{showToast('密码读取失败，请重试','error');return}
+  finally{nodeSecretLoading.value[key]=false}
+ }
+
   passwordVisibility.value[key] = !isPasswordVisible(key)
 }
 
@@ -3458,7 +3479,7 @@ async function handleSendTestNotification() {
 
     <CPUProtectionDialog v-if="cpuProtectionNode" :node-id="cpuProtectionNode.id" :node-name="cpuProtectionNode.name" @close="cpuProtectionNode = null" />
     <div v-if="showNodeModal" class="modal-overlay">
-      <section class="modal-card">
+      <section class="modal-card node-editor">
         <div class="section-head section-head-wrap">
           <div>
             <p class="eyebrow">节点编辑</p>
@@ -3476,13 +3497,10 @@ async function handleSendTestNotification() {
             <span>节点名称</span>
             <input v-model="nodeForm.name" type="text" placeholder="default-node" />
           </label>
-          <label class="form-field">
+          <div class="form-field">
             <span>部署位置</span>
-            <select v-model="nodeForm.deploy_mode">
-              <option value="ssh">远端服务器</option>
-              <option value="local">面板本机</option>
-            </select>
-          </label>
+            <NodeRadioGroup v-model="nodeForm.deploy_mode" label="部署位置" :options="[{value: 'ssh', label: '远程部署'}, {value: 'local', label: '本地部署'}]" />
+          </div>
           <label v-if="nodeForm.deploy_mode === 'ssh'" class="form-field">
             <span>服务器地址</span>
             <input v-model="nodeForm.host" type="text" placeholder="1.2.3.4 或 server.example.com" />
@@ -3495,17 +3513,14 @@ async function handleSendTestNotification() {
             <span>SSH 用户</span>
             <input v-model="nodeForm.ssh_username" type="text" placeholder="root" />
           </label>
-          <label v-if="nodeForm.deploy_mode === 'ssh'" class="form-field">
+          <div v-if="nodeForm.deploy_mode === 'ssh'" class="form-field">
             <span>认证方式</span>
-            <select v-model="nodeForm.ssh_auth_type">
-              <option value="password">密码</option>
-              <option value="key">私钥</option>
-            </select>
-          </label>
+            <NodeRadioGroup v-model="nodeForm.ssh_auth_type" label="认证方式" :options="[{value: 'password', label: '密码'}, {value: 'key', label: '私钥'}]" />
+          </div>
           <label class="form-field password-field" v-if="nodeForm.deploy_mode === 'ssh' && nodeForm.ssh_auth_type === 'password'">
             <span>SSH 密码</span>
             <div class="password-control">
-              <input v-model="nodeForm.ssh_password" class="password-input" :type="isPasswordVisible('nodeSsh') ? 'text' : 'password'" />
+              <input :placeholder="nodeSecretSaved('ssh_password') ? '••••••••' : ''" v-model="nodeForm.ssh_password" class="password-input" :type="isPasswordVisible('nodeSsh') ? 'text' : 'password'" />
               <button
                 class="password-toggle"
                 :class="{ active: isPasswordVisible('nodeSsh') }"
@@ -3550,7 +3565,7 @@ async function handleSendTestNotification() {
                 v-model="nodeForm.sudo_password"
                 class="password-input"
                 :type="isPasswordVisible('nodeSudo') ? 'text' : 'password'"
-                placeholder="如与 SSH 密码一致可重复填写"
+                :placeholder="nodeSecretSaved('sudo_password') ? '••••••••' : '如与 SSH 密码一致可重复填写'"
               />
               <button
                 class="password-toggle"
@@ -3576,27 +3591,15 @@ async function handleSendTestNotification() {
             <span>监听端口</span>
             <input v-model.number="nodeForm.listen_port" type="number" min="1" />
           </label>
-          <label class="form-field">
+          <div class="form-field">
             <span>证书模式</span>
-            <select v-model="nodeForm.tls_mode">
-              <option value="self_signed">自签证书</option>
-              <option value="acme">ACME</option>
-            </select>
-          </label>
-          <label class="form-field">
+            <NodeRadioGroup v-model="nodeForm.tls_mode" label="证书模式" :options="[{value: 'self_signed', label: '自签证书'}, {value: 'acme', label: 'ACME'}]" />
+          </div>
+          <div class="form-field">
             <span>运维模式</span>
-            <select v-model="nodeForm.manage_mode">
-              <option value="agent">Agent</option>
-              <option value="ssh">SSH</option>
-            </select>
-          </label>
-          <label class="form-field">
-            <span>Agent 状态</span>
-            <select v-model="nodeForm.agent_enabled" :disabled="nodeForm.manage_mode !== 'agent'">
-              <option :value="true">启用</option>
-              <option :value="false">停用</option>
-            </select>
-          </label>
+            <NodeRadioGroup v-model="nodeForm.manage_mode" label="运维模式" :options="[{value: 'agent', label: 'Agent'}, {value: 'ssh', label: 'SSH'}]" />
+          </div>
+          <div class="form-field"><span>Agent 状态</span><div class="node-agent-switch"><strong>启用 Agent</strong><ToggleSwitch v-model="nodeForm.agent_enabled" label="启用 Agent" :disabled="nodeForm.manage_mode !== 'agent'" /></div></div>
           <label class="form-field">
             <span>域名</span>
             <input v-model="nodeForm.domain" type="text" placeholder="hy2.example.com" />
@@ -3608,7 +3611,7 @@ async function handleSendTestNotification() {
         </div>
 
         <div class="node-feature-switches">
-          <NodeObfsSettings v-model:enabled="nodeForm.obfs_enabled" v-model:password="nodeForm.obfs_password" />
+          <NodeObfsSettings v-model:enabled="nodeForm.obfs_enabled" v-model:password="nodeForm.obfs_password" :saved="nodeSecretSaved('obfs_password')" @reveal="revealNodeObfs" />
           <NodeLossCompensation v-model="nodeForm.disable_loss_compensation" />
         </div>
 
@@ -3650,7 +3653,7 @@ async function handleSendTestNotification() {
                   v-model="nodeForm.traffic_stats_secret"
                   class="password-input"
                   :type="isPasswordVisible('nodeTrafficSecret') ? 'text' : 'password'"
-                  placeholder="留空则沿用旧值或回退为 Obfs 密码"
+                  :placeholder="nodeSecretSaved('traffic_stats_secret') ? '••••••••' : '留空则沿用旧值'"
                 />
                 <button
                   class="password-toggle"
@@ -3909,4 +3912,11 @@ async function handleSendTestNotification() {
 
 <style scoped>
 .node-feature-switches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:18px 0}.node-feature-switches :deep(.obfs-settings-head){gap:10px}.node-feature-switches :deep(.obfs-settings-icon){width:34px;height:34px}.node-feature-switches :deep(.obfs-settings-copy){min-width:0}@media(max-width:480px){.node-feature-switches{gap:8px}.node-feature-switches :deep(.obfs-settings){padding:12px 10px}.node-feature-switches :deep(.obfs-settings-icon){display:none}.node-feature-switches :deep(.obfs-settings-copy strong){font-size:12px}}
+.node-editor{width:min(860px,100%);background:#101a2b}.node-editor .form-field input,.node-editor .form-field select{height:44px;border-radius:11px}.node-agent-switch{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border:1px solid var(--panel-border);border-radius:11px;background:var(--panel-bg-soft)}.node-agent-switch strong{font-size:13px;font-weight:500}.node-editor .modal-form-grid{gap:18px 22px}.node-editor .advanced-toggle-button{border-radius:11px}.node-editor .node-feature-switches{margin:20px 0}
+
+.node-editor .form-field>span{font-size:12px;font-weight:500;color:var(--text-muted)}.node-editor .form-field input:not([type=radio]),.node-editor .form-field select{height:44px;box-sizing:border-box;padding:0 14px;border:1px solid var(--panel-border);border-radius:11px;background:var(--panel-bg-soft);color:var(--text-main);font-size:13px;transition:border-color .15s,box-shadow .15s}.node-editor .form-field input::placeholder{color:var(--text-muted);opacity:.65}.node-editor .form-field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}.node-editor .password-control{border:0;background:transparent}.node-editor .password-control .password-input{padding-right:44px}.node-editor .password-toggle{right:10px}.node-editor .node-feature-switches :deep(.obfs-settings){border-radius:11px;background:var(--panel-bg-soft)}.node-editor .node-feature-switches :deep(.obfs-settings-icon){border-radius:9px}.node-agent-switch{background:var(--panel-bg-soft)}
+
+.node-editor{scrollbar-width:none}.node-editor::-webkit-scrollbar{display:none}
+
+.node-editor .key-upload-panel{background:transparent;border:0;padding:0}.node-editor .key-upload-summary,.node-editor .key-upload-summary-ready{min-height:44px;box-sizing:border-box;background:var(--panel-bg-soft);border:1px solid var(--panel-border);border-radius:11px;padding:6px 10px;box-shadow:none}.node-editor .key-upload-name{font-size:13px;color:var(--text-main);margin:0}.node-editor .key-upload-trigger{background:transparent;border:1px solid var(--panel-border);border-radius:8px;font-size:12px;padding:5px 10px}
 </style>
