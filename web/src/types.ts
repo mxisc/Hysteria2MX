@@ -106,6 +106,10 @@ export interface HysteriaNodeConfig {
   ssh_port: number
   ssh_username: string
   ssh_auth_type: 'password' | 'key'
+  ssh_password_saved?: boolean
+  sudo_password_saved?: boolean
+  traffic_stats_secret_saved?: boolean
+  obfs_password_saved?: boolean
   ssh_password: string | null
   ssh_private_key_path: string | null
   ssh_private_key_uploaded?: boolean
@@ -148,6 +152,10 @@ export interface HysteriaNodePayload {
   ssh_port: number
   ssh_username: string
   ssh_auth_type: 'password' | 'key'
+  ssh_password_saved?: boolean
+  sudo_password_saved?: boolean
+  traffic_stats_secret_saved?: boolean
+  obfs_password_saved?: boolean
   ssh_password: string
   ssh_private_key_path: string
   ssh_private_key_token?: string

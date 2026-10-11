@@ -1,0 +1,8 @@
+<script setup lang="ts">
+defineProps<{ modelValue: string; label: string; options: { value: string; label: string }[] }>()
+const emit=defineEmits<{ 'update:modelValue':[value:string] }>()
+</script>
+<template><div class="node-radio-group" role="radiogroup" :aria-label="label"><label v-for="option in options" :key="option.value" class="node-radio-option" :class="{selected:modelValue===option.value}"><input type="radio" :name="label" :value="option.value" :checked="modelValue===option.value" @change="emit('update:modelValue',option.value)" /><span class="node-radio-dot" aria-hidden="true" /><span>{{ option.label }}</span></label></div></template>
+<style scoped>
+.node-radio-group{display:flex;gap:5px;padding:4px;min-height:44px;box-sizing:border-box;border:1px solid var(--panel-border);border-radius:11px;background:var(--panel-bg-soft)}.node-radio-option{position:relative;display:flex;align-items:center;justify-content:center;gap:8px;flex:1;padding:7px 9px;border-radius:7px;cursor:pointer;font-size:12px;color:var(--text-muted);transition:background .15s,color .15s}.node-radio-option input{position:absolute;opacity:0;width:1px;height:1px}.node-radio-option.selected{background:var(--accent-soft);color:#b5d0ff}.node-radio-dot{width:12px;height:12px;box-sizing:border-box;border:1px solid #64748b;border-radius:50%;display:grid;place-items:center;flex:none}.selected .node-radio-dot{border-color:var(--accent)}.selected .node-radio-dot:after{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent)}.node-radio-option:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:1px}
+</style>

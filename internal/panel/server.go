@@ -246,6 +246,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("PUT /api/admins/", a.handleUpdateAdmin)
 	mux.HandleFunc("DELETE /api/admins/", a.handleDeleteAdmin)
 	mux.HandleFunc("GET /api/panel/state", a.handlePanelState)
+	mux.HandleFunc("GET /api/nodes/{id}/secret", a.handleNodeSecret)
 	mux.HandleFunc("GET /api/nodes/current", a.handleCurrentNode)
 	mux.HandleFunc("GET /api/nodes/{id}/cpu-protection", a.handleCPUProtection)
 	mux.HandleFunc("GET /api/nodes/{id}/monitor", a.handleNodeMonitor)
@@ -1085,6 +1086,7 @@ func (a *App) handleCurrentNode(writer http.ResponseWriter, request *http.Reques
 		writeError(writer, http.StatusNotFound, httpSafeError(err, "节点不存在"))
 		return
 	}
+	maskNodeSecrets(item)
 	a.writeJSON(writer, http.StatusOK, apiEnvelope{Success: true, Data: map[string]any{"node": item}})
 }
 
@@ -1121,6 +1123,7 @@ func (a *App) handleCreateNode(writer http.ResponseWriter, request *http.Request
 		"name": item["name"],
 		"host": item["host"],
 	})
+	maskNodeSecrets(item)
 	a.writeJSON(writer, http.StatusOK, apiEnvelope{Success: true, Data: map[string]any{"node": item}})
 }
 
@@ -1206,6 +1209,7 @@ func (a *App) handleUpdateNode(writer http.ResponseWriter, request *http.Request
 		"host":    item["host"],
 		"node_id": id,
 	})
+	maskNodeSecrets(item)
 	a.writeJSON(writer, http.StatusOK, apiEnvelope{Success: true, Data: map[string]any{"node": item}})
 }
 
