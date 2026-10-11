@@ -2731,6 +2731,7 @@ func (s *hysteriaService) deployAgentBootstrap(ctx context.Context, node nodeRec
 		return nil, err
 	}
 	configJSON, err := json.Marshal(map[string]any{
+		"cpu_protection":             bootstrap["cpu_protection"],
 		"node_id":                    node.ID,
 		"agent_id":                   bootstrap["agent_id"],
 		"agent_secret":               bootstrap["agent_secret"],

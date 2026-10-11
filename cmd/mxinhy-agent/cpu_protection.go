@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mxinhy/internal/cpuprotection"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,31 +15,11 @@ import (
 )
 
 // Percentages are fractions of the whole machine, not of one core.
-type cpuProtectionConfig struct {
-	Enabled         bool    `json:"enabled"`
-	HighPercent     float64 `json:"high_percent"`
-	LowPercent      float64 `json:"low_percent"`
-	MaxQuotaPercent float64 `json:"max_quota_percent"`
-	MinQuotaPercent float64 `json:"min_quota_percent"`
-}
+type cpuProtectionConfig cpuprotection.Config
 
 func (c cpuProtectionConfig) defaults() (cpuProtectionConfig, error) {
-	if c.HighPercent == 0 {
-		c.HighPercent = 90
-	}
-	if c.LowPercent == 0 {
-		c.LowPercent = 70
-	}
-	if c.MaxQuotaPercent == 0 {
-		c.MaxQuotaPercent = 80
-	}
-	if c.MinQuotaPercent == 0 {
-		c.MinQuotaPercent = 20
-	}
-	if c.HighPercent > 100 || c.HighPercent <= c.LowPercent || c.LowPercent <= 0 || c.MaxQuotaPercent > 100 || c.MaxQuotaPercent <= 0 || c.MinQuotaPercent <= 0 || c.MinQuotaPercent > c.MaxQuotaPercent {
-		return c, fmt.Errorf("CPU protection thresholds are invalid")
-	}
-	return c, nil
+	v, e := cpuprotection.Normalize(cpuprotection.Config(c))
+	return cpuProtectionConfig(v), e
 }
 
 type cpuSample struct {
@@ -252,14 +233,27 @@ func (a *agent) startCPUProtection() error {
 	if state.Quota > cfg.MaxQuotaPercent {
 		state.Quota = cfg.MaxQuotaPercent
 	}
+	if state.Quota > 0 && state.Quota < cfg.MinQuotaPercent {
+		state.Quota = cfg.MinQuotaPercent
+	}
 	if e = applyGuardQuota(state, prev.cores); e != nil {
 		return e
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.cpuGuardCancel = cancel
+	a.cpuGuardDone = make(chan struct{})
+	done := a.cpuGuardDone
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		controller := cpuController{cfg: cfg, quota: state.Quota}
-		for range ticker.C {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
 			data, e := os.ReadFile("/proc/stat")
 			if e != nil {
 				controller.high = 0
@@ -300,5 +294,61 @@ func (a *agent) startCPUProtection() error {
 		}
 	}()
 	writeLog("info", "CPU protection enabled: threshold %.1f%% of whole machine", cfg.HighPercent)
+	return nil
+}
+
+func (a *agent) updateCPUProtection(next cpuProtectionConfig) error {
+	next, e := next.defaults()
+	if e != nil {
+		return e
+	}
+	current, e := a.cfg.CPUProtection.defaults()
+	if e != nil {
+		return e
+	}
+	if current == next {
+		return nil
+	}
+	// Preserve unknown configuration keys when persisting panel changes.
+	data, e := os.ReadFile(a.cfg.AgentConfigPath)
+	if e != nil {
+		return e
+	}
+	var payload map[string]json.RawMessage
+	if e = json.Unmarshal(data, &payload); e != nil {
+		return e
+	}
+	payload["cpu_protection"], e = json.Marshal(next)
+	if e != nil {
+		return e
+	}
+	updated, e := json.Marshal(payload)
+	if e != nil {
+		return e
+	}
+	path := a.cfg.AgentConfigPath
+	if e = os.WriteFile(path+".cpu-tmp", updated, 0600); e != nil {
+		return e
+	}
+	if e = os.Rename(path+".cpu-tmp", path); e != nil {
+		return e
+	}
+	if a.cpuGuardCancel != nil {
+		a.cpuGuardCancel()
+		<-a.cpuGuardDone
+		a.cpuGuardCancel = nil
+	}
+	previous := a.cfg.CPUProtection
+	a.cfg.CPUProtection = next
+	if e = a.startCPUProtection(); e != nil {
+		a.cfg.CPUProtection = previous
+		_ = os.WriteFile(path+".cpu-tmp", data, 0600)
+		_ = os.Rename(path+".cpu-tmp", path)
+		if rollbackErr := a.startCPUProtection(); rollbackErr != nil {
+			writeLog("error", "CPU protection could not resume after failed update")
+		}
+		return e
+	}
+	writeLog("info", "CPU protection configuration synchronized from panel")
 	return nil
 }

@@ -239,6 +239,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/admins/", a.handleDeleteAdmin)
 	mux.HandleFunc("GET /api/panel/state", a.handlePanelState)
 	mux.HandleFunc("GET /api/nodes/current", a.handleCurrentNode)
+	mux.HandleFunc("GET /api/nodes/{id}/cpu-protection", a.handleCPUProtection)
+	mux.HandleFunc("PUT /api/nodes/{id}/cpu-protection", a.handleCPUProtection)
 	mux.HandleFunc("GET /api/nodes", a.handleNodes)
 	mux.HandleFunc("POST /api/nodes", a.handleCreateNode)
 	mux.HandleFunc("POST /api/nodes/install", a.handleCreateNodeAndInstall)
@@ -468,6 +470,11 @@ func (a *App) handleAgentHeartbeat(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	if a.hysteria != nil {
+		if protection, protectionErr := a.agents.cpuProtection(request.Context(), int64Value(record["node_id"])); protectionErr == nil && protection != nil {
+			result["cpu_protection"] = protection
+		} else if protectionErr != nil && a.logger != nil {
+			a.logger.Errorf("CPU protection settings could not be loaded")
+		}
 		if quotaErr := a.hysteria.enforceRealtimeTrafficQuota(request.Context(), int64Value(payload["node_id"]), mapValue(payload["user_traffic"])); quotaErr != nil && a.logger != nil {
 			a.logger.Errorf("agent heartbeat quota enforcement failed: %v", quotaErr)
 		}

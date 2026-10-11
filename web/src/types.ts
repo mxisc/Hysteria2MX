@@ -7,6 +7,20 @@ export type AdminStatus = 'active' | 'disabled'
 export type NodeDeployMode = 'ssh' | 'local'
 export type NodeManageMode = 'agent' | 'ssh'
 export type AgentStatus = 'pending' | 'online' | 'offline' | 'error'
+
+export interface CPUProtectionConfig {
+  enabled: boolean
+  high_percent: number
+  low_percent: number
+  max_quota_percent: number
+  min_quota_percent: number
+}
+
+export interface CPUProtectionState {
+  config: CPUProtectionConfig
+  configured: boolean
+  applied: boolean
+}
 export type Permission =
   | '*'
   | 'panel.view'
