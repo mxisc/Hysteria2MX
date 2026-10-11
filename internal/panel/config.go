@@ -233,16 +233,6 @@ func ConfigToEnvMap(cfg Config) map[string]string {
 	return values
 }
 
-func (c Config) nodeObfsDisabled(nodeID int64) bool {
-	for _, value := range strings.Split(c.ObfsDisabledNodeIDs, ",") {
-		id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
-		if err == nil && id > 0 && id == nodeID {
-			return true
-		}
-	}
-	return false
-}
-
 func resolveStaticDir(configPath string, staticDir string) string {
 	staticDir = strings.TrimSpace(staticDir)
 	if staticDir == "" {

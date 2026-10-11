@@ -20,7 +20,7 @@ const (
 	agentStatusOnline   = "online"
 	agentStatusOffline  = "offline"
 	agentStatusError    = "error"
-	currentAgentVersion = "0.1.3"
+	currentAgentVersion = "0.1.4"
 
 	taskStatusPending = "pending"
 	taskStatusRunning = "running"
@@ -152,6 +152,7 @@ func (s *agentService) presentAgent(record map[string]any) map[string]any {
 		return nil
 	}
 	return map[string]any{
+		"system_metrics":             mapValue(record["last_payload_json"])["system_metrics"],
 		"agent_id":                   record["agent_id"],
 		"status":                     s.effectiveStatus(record),
 		"version":                    record["version"],

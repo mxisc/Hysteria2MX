@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import NodeMonitor from './components/NodeMonitor.vue'
+import NodeObfsSettings from './components/NodeObfsSettings.vue'
 import CPUProtectionDialog from './components/CPUProtectionDialog.vue'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
@@ -86,6 +88,7 @@ const sections = [
   { id: 'overview', label: '总览' },
   { id: 'traffic', label: '流量统计' },
   { id: 'nodes', label: '节点配置' },
+  { id: 'monitor', label: '节点监控' },
   { id: 'users', label: '用户管理' },
   { id: 'logsAudit', label: '日志审计' },
   { id: 'appearance', label: '综合配置' },
@@ -190,6 +193,7 @@ function createEmptyNodeForm(): HysteriaNodePayload {
     domain: '',
     acme_email: '',
     obfs_password: createDefaultObfsPassword(),
+    obfs_enabled: true,
     masquerade_url: 'https://www.bing.com',
     bandwidth_up_mbps: 200,
     bandwidth_down_mbps: 200,
@@ -230,6 +234,7 @@ function mapNodeToForm(node: HysteriaNodeConfig): HysteriaNodePayload {
     domain: node.domain,
     acme_email: node.acme_email,
     obfs_password: node.obfs_password,
+    obfs_enabled: node.obfs_enabled,
     masquerade_url: node.masquerade_url,
     bandwidth_up_mbps: Number(node.bandwidth_up_mbps),
     bandwidth_down_mbps: Number(node.bandwidth_down_mbps),
@@ -392,6 +397,7 @@ function canAccessSection(sectionId: SectionId): boolean {
       return hasPermission('panel.view')
     case 'traffic':
       return hasPermission('panel.view')
+    case 'monitor':
     case 'nodes':
       return hasPermission('node.view')
     case 'users':
@@ -588,6 +594,7 @@ const notificationSettingsForm = ref<NotificationSettings>({
   smtp_from_name: 'Hysteria2 Panel',
   smtp_notify_email: '',
 })
+const monitorNodeId = ref<number | undefined>(undefined)
 const nodeForm = ref<HysteriaNodePayload>(createEmptyNodeForm())
 const userForm = ref<UserEditorForm>(createEmptyUserForm())
 const adminForm = ref<AdminEditorForm>(createEmptyAdminForm())
@@ -2761,6 +2768,8 @@ async function handleSendTestNotification() {
 
       </section>
 
+      <NodeMonitor v-else-if="currentSection === 'monitor'" :initial-node-id="monitorNodeId" />
+
       <section v-else-if="currentSection === 'nodes'" class="content-page">
         <article class="card">
           <div class="section-head section-head-wrap">
@@ -2809,6 +2818,7 @@ async function handleSendTestNotification() {
                 </template>
               </span>
               <span class="node-inline-actions">
+                <button class="secondary compact-button" @click="monitorNodeId = node.id; void setSection('monitor')">监控</button>
                 <button v-if="hasPermission('node.manage')" class="secondary compact-button" @click="handleEditNode(node)">编辑</button>
                 <button v-if="hasPermission('node.manage') && node.agent_enabled" class="secondary compact-button" @click="cpuProtectionNode = node">CPU保护</button>
                 <button
@@ -3594,6 +3604,8 @@ async function handleSendTestNotification() {
           </label>
         </div>
 
+        <NodeObfsSettings v-model:enabled="nodeForm.obfs_enabled" v-model:password="nodeForm.obfs_password" />
+
         <div class="advanced-toggle-wrap">
           <button class="secondary advanced-toggle-button" :disabled="busyAction === 'node-save'" @click="showNodeAdvancedOptions = !showNodeAdvancedOptions">
             {{ showNodeAdvancedOptions ? '收起高级选项' : '展开高级选项' }}
@@ -3653,10 +3665,6 @@ async function handleSendTestNotification() {
                   </svg>
                 </button>
               </div>
-            </label>
-            <label class="form-field">
-              <span>Obfs 密码</span>
-              <input v-model="nodeForm.obfs_password" type="text" placeholder="用于 salamander 混淆" />
             </label>
             <label class="form-field" v-if="nodeForm.tls_mode === 'self_signed'">
               <span>证书路径</span>

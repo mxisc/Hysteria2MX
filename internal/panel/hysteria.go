@@ -166,7 +166,7 @@ func (s *hysteriaService) listNodesPageForUser(ctx context.Context, user *authUs
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, current_node, deploy_mode, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path,
 		       sudo_password, install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret,
-		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps,
+		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, obfs_enabled, masquerade_url, bandwidth_up_mbps,
 		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
 		       agent_install_path, agent_config_path, agent_service_name, deleted_at, created_at, updated_at
 		FROM server_nodes
@@ -245,7 +245,7 @@ func (s *hysteriaService) saveNode(ctx context.Context, payload map[string]any, 
 			UPDATE server_nodes SET
 				deploy_mode=?, name=?, host=?, ssh_port=?, ssh_username=?, ssh_auth_type=?, ssh_password=?, ssh_private_key_path=?, sudo_password=?,
 				install_script=?, service_name=?, config_path=?, listen_port=?, traffic_stats_listen=?, traffic_stats_secret=?, tls_mode=?,
-				tls_cert_path=?, tls_key_path=?, domain=?, acme_email=?, obfs_password=?, masquerade_url=?, bandwidth_up_mbps=?,
+				tls_cert_path=?, tls_key_path=?, domain=?, acme_email=?, obfs_password=?, obfs_enabled=?, masquerade_url=?, bandwidth_up_mbps=?,
 				bandwidth_down_mbps=?, manage_mode=?, agent_enabled=?, agent_report_interval_seconds=?, agent_task_poll_interval_seconds=?,
 				agent_install_path=?, agent_config_path=?, agent_service_name=?
 			WHERE id=?`,
@@ -253,7 +253,7 @@ func (s *hysteriaService) saveNode(ctx context.Context, payload map[string]any, 
 			encrypted["ssh_password"], encrypted["ssh_private_key_path"], encrypted["sudo_password"], encrypted["install_script"],
 			encrypted["service_name"], encrypted["config_path"], encrypted["listen_port"], encrypted["traffic_stats_listen"],
 			encrypted["traffic_stats_secret"], encrypted["tls_mode"], encrypted["tls_cert_path"], encrypted["tls_key_path"],
-			encrypted["domain"], encrypted["acme_email"], encrypted["obfs_password"], encrypted["masquerade_url"],
+			encrypted["domain"], encrypted["acme_email"], encrypted["obfs_password"], encrypted["obfs_enabled"], encrypted["masquerade_url"],
 			encrypted["bandwidth_up_mbps"], encrypted["bandwidth_down_mbps"], encrypted["manage_mode"], encrypted["agent_enabled"],
 			encrypted["agent_report_interval_seconds"], encrypted["agent_task_poll_interval_seconds"], encrypted["agent_install_path"],
 			encrypted["agent_config_path"], encrypted["agent_service_name"], current.ID)
@@ -267,14 +267,14 @@ func (s *hysteriaService) saveNode(ctx context.Context, payload map[string]any, 
 		INSERT INTO server_nodes (
 			deploy_mode, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path, sudo_password,
 			install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret, tls_mode,
-			tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps, bandwidth_down_mbps,
+			tls_cert_path, tls_key_path, domain, acme_email, obfs_password, obfs_enabled, masquerade_url, bandwidth_up_mbps, bandwidth_down_mbps,
 			manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds, agent_install_path,
 			agent_config_path, agent_service_name
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		encrypted["deploy_mode"], encrypted["name"], encrypted["host"], encrypted["ssh_port"], encrypted["ssh_username"], encrypted["ssh_auth_type"],
 		encrypted["ssh_password"], encrypted["ssh_private_key_path"], encrypted["sudo_password"], encrypted["install_script"], encrypted["service_name"],
 		encrypted["config_path"], encrypted["listen_port"], encrypted["traffic_stats_listen"], encrypted["traffic_stats_secret"], encrypted["tls_mode"],
-		encrypted["tls_cert_path"], encrypted["tls_key_path"], encrypted["domain"], encrypted["acme_email"], encrypted["obfs_password"],
+		encrypted["tls_cert_path"], encrypted["tls_key_path"], encrypted["domain"], encrypted["acme_email"], encrypted["obfs_password"], encrypted["obfs_enabled"],
 		encrypted["masquerade_url"], encrypted["bandwidth_up_mbps"], encrypted["bandwidth_down_mbps"], encrypted["manage_mode"],
 		encrypted["agent_enabled"], encrypted["agent_report_interval_seconds"], encrypted["agent_task_poll_interval_seconds"],
 		encrypted["agent_install_path"], encrypted["agent_config_path"], encrypted["agent_service_name"])
@@ -1239,7 +1239,7 @@ func (s *hysteriaService) getStoredNode(ctx context.Context, id int64) (*nodeRec
 	query := `
 		SELECT id, current_node, deploy_mode, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path,
 		       sudo_password, install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret,
-		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps,
+		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, obfs_enabled, masquerade_url, bandwidth_up_mbps,
 		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
 		       agent_install_path, agent_config_path, agent_service_name, deleted_at, created_at, updated_at
 		FROM server_nodes`
@@ -1269,7 +1269,7 @@ func (s *hysteriaService) listStoredNodes(ctx context.Context) ([]nodeRecord, er
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, current_node, deploy_mode, name, host, ssh_port, ssh_username, ssh_auth_type, ssh_password, ssh_private_key_path,
 		       sudo_password, install_script, service_name, config_path, listen_port, traffic_stats_listen, traffic_stats_secret,
-		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, masquerade_url, bandwidth_up_mbps,
+		       tls_mode, tls_cert_path, tls_key_path, domain, acme_email, obfs_password, obfs_enabled, masquerade_url, bandwidth_up_mbps,
 		       bandwidth_down_mbps, manage_mode, agent_enabled, agent_report_interval_seconds, agent_task_poll_interval_seconds,
 	       agent_install_path, agent_config_path, agent_service_name, deleted_at, created_at, updated_at
 		FROM server_nodes
@@ -1312,7 +1312,6 @@ func (s *hysteriaService) decryptStoredNodeSecrets(record *nodeRecord) error {
 	if record == nil || s == nil || s.cfg == nil {
 		return nil
 	}
-	record.ObfsDisabled = s.cfg.nodeObfsDisabled(record.ID)
 	var err error
 	if record.SSHPassword, err = DecryptValue(record.SSHPassword, *s.cfg); err != nil {
 		return err
@@ -1553,6 +1552,7 @@ func (s *hysteriaService) decryptNode(record nodeRecord) (map[string]any, error)
 		"domain":                           record.Domain,
 		"acme_email":                       record.ACMEEmail,
 		"obfs_password":                    obfsPassword,
+		"obfs_enabled":                     !record.ObfsDisabled,
 		"masquerade_url":                   defaultString(record.MasqueradeURL, "https://www.cloudflare.com"),
 		"bandwidth_up_mbps":                record.BandwidthUpMbps,
 		"bandwidth_down_mbps":              record.BandwidthDownMbps,
@@ -1622,6 +1622,7 @@ func (s *hysteriaService) normalizeNodePayload(payload map[string]any, current *
 		"domain":                           toTrimmedString(payload["domain"]),
 		"acme_email":                       toTrimmedString(payload["acme_email"]),
 		"obfs_password":                    toTrimmedString(payload["obfs_password"]),
+		"obfs_enabled":                     toBool(payload["obfs_enabled"], boolValue(currentMap["obfs_enabled"], true)),
 		"masquerade_url":                   defaultString(toTrimmedString(payload["masquerade_url"]), "https://www.bing.com"),
 		"bandwidth_up_mbps":                boundedInt(payload["bandwidth_up_mbps"], 0, 100000, maxInt(intValue(currentMap["bandwidth_up_mbps"]), 200)),
 		"bandwidth_down_mbps":              boundedInt(payload["bandwidth_down_mbps"], 0, 100000, maxInt(intValue(currentMap["bandwidth_down_mbps"]), 200)),
@@ -1676,7 +1677,20 @@ func (s *hysteriaService) normalizeNodePayload(payload map[string]any, current *
 		data["ssh_private_key_path"] = ""
 	}
 
-	for _, required := range []string{"host", "ssh_username", "obfs_password"} {
+	if data["obfs_password"] == "" {
+		data["obfs_password"] = toString(currentMap["obfs_password"])
+	}
+	if data["obfs_password"] == "" {
+		if boolValue(data["obfs_enabled"], true) {
+			return nil, errors.New("开启混淆时请填写混淆密码")
+		}
+		secret, e := randomHex(24)
+		if e != nil {
+			return nil, errors.New("节点安全配置生成失败")
+		}
+		data["obfs_password"] = secret
+	}
+	for _, required := range []string{"host", "ssh_username"} {
 		if strings.TrimSpace(toString(data[required])) == "" {
 			return nil, errors.New(required + " 不能为空")
 		}
@@ -3134,17 +3148,18 @@ func isUserSubscribable(user userRecord) bool {
 
 func scanNodeRecord(scanner interface{ Scan(...any) error }) (nodeRecord, error) {
 	var record nodeRecord
-	var agentEnabled int
+	var agentEnabled, obfsEnabled int
 	err := scanner.Scan(
 		&record.ID, &record.CurrentNode, &record.DeployMode, &record.Name, &record.Host, &record.SSHPort, &record.SSHUsername, &record.SSHAuthType,
 		&record.SSHPassword, &record.SSHPrivateKeyPath, &record.SudoPassword, &record.InstallScript, &record.ServiceName,
 		&record.ConfigPath, &record.ListenPort, &record.TrafficStatsListen, &record.TrafficStatsSecret, &record.TLSMode,
-		&record.TLSCertPath, &record.TLSKeyPath, &record.Domain, &record.ACMEEmail, &record.ObfsPassword, &record.MasqueradeURL,
+		&record.TLSCertPath, &record.TLSKeyPath, &record.Domain, &record.ACMEEmail, &record.ObfsPassword, &obfsEnabled, &record.MasqueradeURL,
 		&record.BandwidthUpMbps, &record.BandwidthDownMbps, &record.ManageMode, &agentEnabled, &record.AgentReportIntervalSeconds,
 		&record.AgentTaskPollIntervalSeconds, &record.AgentInstallPath, &record.AgentConfigPath, &record.AgentServiceName,
 		&record.DeletedAt, &record.CreatedAt, &record.UpdatedAt,
 	)
 	record.AgentEnabled = agentEnabled == 1
+	record.ObfsDisabled = obfsEnabled == 0
 	return record, err
 }
 

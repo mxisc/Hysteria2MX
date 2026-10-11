@@ -69,6 +69,12 @@ func NewServer(config Config, logger *PanelLogger) (*http.Server, error) {
 		}
 	}
 
+	if db != nil {
+		if err := migrateLegacyObfsConfig(db, &config); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
 	loginProtection, err := newLoginProtectionService(&config)
 	if err != nil {
 		return nil, err
@@ -141,13 +147,14 @@ func (a *App) startTrafficSyncLoop() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.trafficSyncStop = cancel
-	a.backgroundWG.Add(1)
+	a.backgroundWG.Add(2)
 	a.backgroundMu.Unlock()
 
 	go func() {
 		defer a.backgroundWG.Done()
 		a.runTrafficSyncLoop(ctx)
 	}()
+	go func() { defer a.backgroundWG.Done(); a.startMonitorCleanup(ctx) }()
 }
 
 func (a *App) stopTrafficSyncLoop() {
@@ -213,6 +220,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /api/agent/download/", a.handleAgentDownload)
 	mux.HandleFunc("POST /api/agent/register", a.handleAgentRegister)
 	mux.HandleFunc("POST /api/agent/heartbeat", a.handleAgentHeartbeat)
+	mux.HandleFunc("POST /api/agent/metrics", a.handleAgentMetrics)
 	mux.HandleFunc("POST /api/agent/tasks/pull", a.handleAgentPullTask)
 	mux.HandleFunc("POST /api/agent/tasks/", a.handleAgentCompleteTask)
 	mux.HandleFunc("GET /subscription/", a.handleSubscription)
@@ -240,6 +248,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /api/panel/state", a.handlePanelState)
 	mux.HandleFunc("GET /api/nodes/current", a.handleCurrentNode)
 	mux.HandleFunc("GET /api/nodes/{id}/cpu-protection", a.handleCPUProtection)
+	mux.HandleFunc("GET /api/nodes/{id}/monitor", a.handleNodeMonitor)
+	mux.HandleFunc("GET /api/node-monitors", a.handleMonitorNodes)
 	mux.HandleFunc("PUT /api/nodes/{id}/cpu-protection", a.handleCPUProtection)
 	mux.HandleFunc("GET /api/nodes", a.handleNodes)
 	mux.HandleFunc("POST /api/nodes", a.handleCreateNode)

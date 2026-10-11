@@ -477,6 +477,7 @@ function createNode(
     domain,
     acme_email: 'admin@example.com',
     obfs_password: `mock-obfs-${id}`,
+    obfs_enabled: true,
     masquerade_url: 'https://example.com',
     bandwidth_up_mbps: 300 + (id % 4) * 100,
     bandwidth_down_mbps: 600 + (id % 4) * 200,

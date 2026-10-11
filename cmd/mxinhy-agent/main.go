@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"mxinhy/internal/nodemonitor"
 	"net"
 	"net/http"
 	"os"
@@ -25,7 +26,7 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.3"
+const agentVersion = "0.1.4"
 const logDir = "/var/log/mxinhy-agent"
 const agentLogPath = logDir + "/agent.log"
 const hysteriaLogPath = logDir + "/hysteria.log"
@@ -81,6 +82,7 @@ type registerPayload struct {
 }
 
 type heartbeatPayload struct {
+	SystemMetrics        *nodemonitor.Metrics      `json:"system_metrics,omitempty"`
 	CPUProtection        cpuProtectionConfig       `json:"cpu_protection"`
 	NodeID               int                       `json:"node_id"`
 	Version              string                    `json:"version"`
@@ -148,6 +150,8 @@ type taskCompletePayload struct {
 }
 
 type agent struct {
+	monitorMu      sync.RWMutex
+	latestMetrics  *nodemonitor.Metrics
 	cpuGuardCancel context.CancelFunc
 	cpuGuardDone   chan struct{}
 	cfg            config
@@ -290,6 +294,9 @@ func loadConfig(path string) (config, error) {
 }
 
 func (a *agent) run() error {
+	monitorContext, stopMonitoring := context.WithCancel(context.Background())
+	defer stopMonitoring()
+	a.startMonitoring(monitorContext)
 	a.setLastHeartbeatSuccess(time.Now())
 	if err := a.register(); err != nil {
 		if errors.Is(err, errNodeDeleted) {
@@ -497,7 +504,7 @@ func (a *agent) register() error {
 	payload := registerPayload{
 		NodeID:       a.cfg.NodeID,
 		Version:      agentVersion,
-		Capabilities: []string{"service", "logs", "traffic", "streams", "config", "kick_clients", "local_auth"},
+		Capabilities: []string{"service", "logs", "traffic", "streams", "config", "kick_clients", "local_auth", "system_monitor"},
 	}
 
 	return a.postJSON("/agent/register", payload, nil)
@@ -506,6 +513,7 @@ func (a *agent) register() error {
 func (a *agent) sendHeartbeat() error {
 	summary := a.collectHeartbeatSummary()
 	payload := heartbeatPayload{
+		SystemMetrics:        a.monitoringSnapshot(),
 		CPUProtection:        a.cfg.CPUProtection,
 		NodeID:               a.cfg.NodeID,
 		Version:              agentVersion,

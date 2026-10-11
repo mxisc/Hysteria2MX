@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS server_nodes (
     domain VARCHAR(255) NOT NULL,
     acme_email VARCHAR(255) NOT NULL,
     obfs_password VARCHAR(255) NOT NULL,
+    obfs_enabled TINYINT(1) NOT NULL DEFAULT 1,
     masquerade_url VARCHAR(255) NOT NULL DEFAULT 'https://www.cloudflare.com',
     bandwidth_up_mbps INT NOT NULL DEFAULT 200,
     bandwidth_down_mbps INT NOT NULL DEFAULT 200,
@@ -171,3 +172,20 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
     INDEX idx_agent_tasks_expires (expires_at),
     CONSTRAINT fk_agent_tasks_node FOREIGN KEY (node_id) REFERENCES server_nodes(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS node_system_metrics (
+ id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+ node_id BIGINT UNSIGNED NOT NULL,
+ sampled_at_ms BIGINT NOT NULL,
+ cpu_percent DOUBLE NULL,
+ memory_percent DOUBLE NOT NULL,
+ swap_percent DOUBLE NOT NULL,
+ disk_percent DOUBLE NOT NULL,
+ load1 DOUBLE NOT NULL,
+ rx_rate DOUBLE NULL,
+ tx_rate DOUBLE NULL,
+ payload_json JSON NOT NULL,
+ UNIQUE KEY uniq_node_sample (node_id,sampled_at_ms),
+ INDEX idx_monitor_retention (sampled_at_ms),
+ CONSTRAINT fk_node_system_metrics_node FOREIGN KEY (node_id) REFERENCES server_nodes(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
