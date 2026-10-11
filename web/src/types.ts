@@ -125,6 +125,7 @@ export interface HysteriaNodeConfig {
   acme_email: string
   obfs_password: string
   masquerade_url: string
+  disable_loss_compensation: boolean
   bandwidth_up_mbps: number
   bandwidth_down_mbps: number
   manage_mode: NodeManageMode
@@ -167,6 +168,7 @@ export interface HysteriaNodePayload {
   acme_email: string
   obfs_password: string
   masquerade_url: string
+  disable_loss_compensation: boolean
   bandwidth_up_mbps: number
   bandwidth_down_mbps: number
   manage_mode: NodeManageMode

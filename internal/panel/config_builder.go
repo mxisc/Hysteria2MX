@@ -66,9 +66,10 @@ masquerade:
 bandwidth:
   up: %d mbps
   down: %d mbps
+  disableLossCompensation: %t
 ignoreClientBandwidth: false
 %s
-`, node.ListenPort, tlsBlock, authBlock, obfsBlock, node.MasqueradeURL, node.BandwidthUpMbps, node.BandwidthDownMbps, trafficBlock)
+`, node.ListenPort, tlsBlock, authBlock, obfsBlock, node.MasqueradeURL, node.BandwidthUpMbps, node.BandwidthDownMbps, node.DisableLossCompensation, trafficBlock)
 }
 
 func buildDisabledUserpassBlock(node nodeRecord) string {

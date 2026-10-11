@@ -479,6 +479,7 @@ function createNode(
     obfs_password: `mock-obfs-${id}`,
     obfs_enabled: true,
     masquerade_url: 'https://example.com',
+    disable_loss_compensation: false,
     bandwidth_up_mbps: 300 + (id % 4) * 100,
     bandwidth_down_mbps: 600 + (id % 4) * 200,
     manage_mode: id % 3 === 0 ? 'ssh' : 'agent',
