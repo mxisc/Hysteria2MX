@@ -78,6 +78,7 @@ export interface PaginatedResult<T> {
 }
 
 export interface NodeAgentInfo {
+	 system_metrics?: NodeSystemMetrics | null
   agent_id: string
   status: AgentStatus
   version: string
@@ -96,6 +97,7 @@ export interface NodeAgentInfo {
 }
 
 export interface HysteriaNodeConfig {
+	 obfs_enabled: boolean
   id: number
   current_node: number
   deploy_mode: NodeDeployMode
@@ -138,6 +140,7 @@ export interface HysteriaNodeConfig {
 }
 
 export interface HysteriaNodePayload {
+	 obfs_enabled: boolean
   name: string
   deploy_mode: NodeDeployMode
   host: string
@@ -407,4 +410,55 @@ export interface NotificationSettings {
   smtp_from_email: string
   smtp_from_name: string
   smtp_notify_email: string
+}
+
+export interface NodeSystemMetrics {
+  sampled_at_ms: number
+  boot_id: string
+  cpu_cores: number
+  cpu_percent: number | null
+  memory_total: number
+  memory_used: number
+  memory_percent: number
+  swap_total: number
+  swap_used: number
+  swap_percent: number
+  disk_total: number
+  disk_used: number
+  disk_percent: number
+  load1: number
+  uptime_seconds: number
+  network_rx: number
+  network_tx: number
+  rx_bytes_per_second: number | null
+  tx_bytes_per_second: number | null
+}
+export interface NodeMonitorPoint {
+  sampled_at_ms: number
+  cpu_percent: number | null
+  cpu_peak: number | null
+  memory_percent: number
+  swap_percent: number
+  disk_percent: number
+  load1: number
+  rx_bytes_per_second: number | null
+  tx_bytes_per_second: number | null
+}
+export interface MonitorNode {
+  id: number
+  name: string
+  host: string
+  agent_enabled: boolean
+  obfs_enabled: boolean
+}
+export interface NodeMonitorData {
+  node_id: number
+  latest: NodeSystemMetrics | null
+  points: NodeMonitorPoint[]
+  fresh: boolean
+  agent: NodeAgentInfo | null
+  from_ms: number
+  to_ms: number
+  bucket_ms: number
+  retention_days: number
 }

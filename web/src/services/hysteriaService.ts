@@ -1,4 +1,6 @@
 import type {
+  MonitorNode,
+  NodeMonitorData,
   CPUProtectionConfig,
   CPUProtectionState,
   AdminUser,
@@ -612,4 +614,18 @@ async function waitForJob(id: string): Promise<RemoteCommandResult> {
   }
 
   throw new Error('任务执行超时，请稍后刷新状态确认结果')
+}
+
+export async function fetchMonitorNodes(signal?: AbortSignal): Promise<MonitorNode[]> {
+  if (await shouldUseMockPanel()) {
+    return getMockNodes().map(({ id, name, host, agent_enabled, obfs_enabled }) => ({ id, name, host, agent_enabled, obfs_enabled }))
+  }
+  return request<MonitorNode[]>('/node-monitors', { signal })
+}
+export async function fetchNodeMonitor(nodeId: number, range: string, signal?: AbortSignal): Promise<NodeMonitorData> {
+  if (await shouldUseMockPanel()) {
+    const { createMockMonitor } = await import('./mockMonitor')
+    return createMockMonitor(nodeId, range)
+  }
+  return request<NodeMonitorData>(`/nodes/${nodeId}/monitor?range=${encodeURIComponent(range)}`, { signal })
 }

@@ -21,12 +21,21 @@ func TestDisabledObfsKeepsTLSAuthAndStats(t *testing.T) {
 	}
 }
 
-func TestObfsDisabledNodeSelectionAndPersistence(t *testing.T) {
-	cfg := Config{ObfsDisabledNodeIDs: "22, 23"}
-	if !cfg.nodeObfsDisabled(22) || !cfg.nodeObfsDisabled(23) || cfg.nodeObfsDisabled(2) || cfg.nodeObfsDisabled(0) {
-		t.Fatal("node selection must match exact IDs")
+func TestNodeObfsSwitchAllowsBlankPasswordWhenOff(t *testing.T) {
+	s := &hysteriaService{cfg: &Config{}}
+	payload := map[string]any{"deploy_mode": "local", "tls_mode": "self_signed", "obfs_enabled": false}
+	data, e := s.normalizeNodePayload(payload, nil)
+	if e != nil || boolValue(data["obfs_enabled"], true) || toString(data["obfs_password"]) == "" {
+		t.Fatal("disabled new node must get an internal secret without requiring an obfs password")
 	}
-	if ConfigToEnvMap(cfg)["HYSTERIA_OBFS_DISABLED_NODES"] != cfg.ObfsDisabledNodeIDs {
-		t.Fatal("saving panel configuration must retain disabled node IDs")
+	payload["obfs_enabled"] = true
+	if _, e = s.normalizeNodePayload(payload, nil); e == nil {
+		t.Fatal("enabling obfs without a password must be rejected")
+	}
+	current := &nodeRecord{ID: 22, DeployMode: "local", TLSMode: "self_signed", ObfsDisabled: true, ObfsPassword: "existing-secret"}
+	payload["obfs_enabled"] = false
+	data, e = s.normalizeNodePayload(payload, current)
+	if e != nil || toString(data["obfs_password"]) != "existing-secret" {
+		t.Fatal("changing switch must preserve auth/stats fallback secret")
 	}
 }
