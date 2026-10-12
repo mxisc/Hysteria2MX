@@ -1,0 +1,85 @@
+name: Build and release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      deploy:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: go test ./...
+      - run: |
+          npm ci
+          npm run build
+          mkdir -p build/panel artifacts/agent
+          go build -tags release_embed -o build/panel/mxinhy-panel ./cmd/mxinhy-panel
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o artifacts/agent/mxinhy-agent-linux-amd64 ./cmd/mxinhy-agent
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o artifacts/agent/mxinhy-agent-linux-arm64 ./cmd/mxinhy-agent
+          mkdir -p build/release-root/build/panel build/release-root/config build/release-root/database/migrations
+          cp build/panel/mxinhy-panel build/release-root/build/panel/
+          cp -R artifacts build/release-root/
+          cp config/panel.env.example build/release-root/config/
+          cp database/schema.sql build/release-root/database/
+          cp database/migrations/*.sql build/release-root/database/migrations/
+          cp -R deploy public build/release-root/
+          cp package.json build/release-root/
+          tar -czf hysteria2-plan.tar.gz -C build/release-root .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime
+          path: hysteria2-plan.tar.gz
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: runtime
+      - run: gh release create "$RELEASE_TAG" hysteria2-plan.tar.gz --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+  deploy:
+    if: (startsWith(github.ref, 'refs/tags/') && vars.DEPLOY_ENABLED == 'true') || (github.event_name == 'workflow_dispatch' && inputs.deploy)
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: runtime
+      - run: |
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_PATH"
+          bash scripts/ci/prepare_ssh.sh
+          bash scripts/ci/deploy_release.sh hysteria2-plan.tar.gz
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}

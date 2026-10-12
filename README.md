@@ -152,3 +152,9 @@ storage/                运行时数据目录
 ## 许可证
 
 本项目采用 MIT 许可证。
+
+## 发布
+
+推送 `v*` 标签后，GitHub Actions 构建并发布 `hysteria2-plan.tar.gz` 到 GitHub Releases。在线更新读取正式 Release，只接受包含此运行包的版本。
+
+生产自动部署需配置 `production` 环境的 `SSH_PRIVATE_KEY`、`DEPLOY_KNOWN_HOSTS`，以及 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_PATH`、`DEPLOY_PORT` 变量；设置 `DEPLOY_ENABLED=true` 后在标签构建完成时部署，也可手动运行工作流并选择部署。

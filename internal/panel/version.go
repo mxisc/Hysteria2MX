@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,9 +17,8 @@ import (
 	"time"
 )
 
-const gitlabUpstreamProjectID = "82842050"
-const gitlabRuntimePackageName = "mxinhy-runtime"
-const gitlabRuntimePackageFileName = "hysteria2-plan.tar.gz"
+const githubUpstreamRepository = "mxisc/Hysteria2MX"
+const runtimePackageFileName = "hysteria2-plan.tar.gz"
 const defaultPanelServiceName = "mxinhy-panel"
 const defaultUpgradeKeepReleases = 5
 
@@ -41,11 +41,12 @@ func checkLatestVersion(rootDir string) (map[string]any, error) {
 	latestTag := ""
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://gitlab.com/api/v4/projects/"+gitlabUpstreamProjectID+"/repository/tags?per_page=1&order_by=updated", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+githubUpstreamRepository+"/releases/latest", nil)
 	if err != nil {
 		return nil, errors.New("检查更新失败")
 	}
 	req.Header.Set("User-Agent", "mxinhy-version-check")
+	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := client.Do(req)
 	if err != nil {
 		return map[string]any{
@@ -56,11 +57,24 @@ func checkLatestVersion(rootDir string) (map[string]any, error) {
 		}, nil
 	}
 	defer resp.Body.Close()
-	var tags []map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&tags); err == nil && len(tags) > 0 {
-		latestTag = toString(tags[0]["name"])
-		latestVersion = strings.TrimPrefix(latestTag, "v")
+	var release struct {
+		Tag        string `json:"tag_name"`
+		Draft      bool   `json:"draft"`
+		Prerelease bool   `json:"prerelease"`
+		Assets     []struct {
+			Name string `json:"name"`
+		} `json:"assets"`
 	}
+	if resp.StatusCode == http.StatusOK && json.NewDecoder(resp.Body).Decode(&release) == nil && !release.Draft && !release.Prerelease {
+		for _, asset := range release.Assets {
+			if asset.Name == runtimePackageFileName {
+				latestTag = release.Tag
+				latestVersion = strings.TrimPrefix(latestTag, "v")
+				break
+			}
+		}
+	}
+
 	hasUpdate := latestVersion != "" && currentVersion != "unknown" && compareVersion(latestVersion, currentVersion) > 0
 	var latest any
 	if latestVersion != "" {
@@ -99,7 +113,7 @@ func upgradeLatestVersion(rootDir string) (map[string]any, error) {
 		return nil, errors.New("创建临时目录失败")
 	}
 	defer os.RemoveAll(tmpDir)
-	archivePath := filepath.Join(tmpDir, gitlabRuntimePackageFileName)
+	archivePath := filepath.Join(tmpDir, runtimePackageFileName)
 	extractDir := filepath.Join(tmpDir, "extracted")
 	tag := "v" + latest
 	if err := downloadToFile(runtimePackageURL(tag), archivePath, "mxinhy-upgrade"); err != nil {
@@ -142,7 +156,7 @@ func currentAppVersion(rootDir string) string {
 }
 
 func runtimePackageURL(tag string) string {
-	return "https://gitlab.com/api/v4/projects/" + gitlabUpstreamProjectID + "/packages/generic/" + gitlabRuntimePackageName + "/" + tag + "/" + gitlabRuntimePackageFileName
+	return "https://github.com/" + githubUpstreamRepository + "/releases/download/" + url.PathEscape(tag) + "/" + runtimePackageFileName
 }
 
 func detectInstallLayout(rootDir string) installLayout {
