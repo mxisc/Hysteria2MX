@@ -64,8 +64,8 @@ echo "提交本地改动和版本变更..."
 git add -A
 git commit -m "chore: release v${NEW_VERSION}"
 
-echo "推送代码到远程（跳过本次 main 流水线，后续由 tag 流水线负责发布）..."
-git push -o ci.skip origin main
+echo "推送代码到远程..."
+git push origin main
 
 echo "创建发布标签..."
 git tag -a "${TAG_NAME}" -m "Release ${TAG_NAME}"
@@ -74,5 +74,5 @@ echo "推送发布标签..."
 git push origin "${TAG_NAME}"
 
 echo ""
-echo "推送完成！已跳过本次 main 流水线，仅由版本标签 ${TAG_NAME} 触发一次发布流水线。"
-echo "查看进度: https://gitlab.com/-/pipelines/"
+echo "推送完成！版本标签 ${TAG_NAME} 触发一次发布流水线。"
+echo "查看进度: https://github.com/mxisc/Hysteria2MX/actions"
