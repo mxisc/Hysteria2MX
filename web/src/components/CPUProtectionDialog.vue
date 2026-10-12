@@ -62,34 +62,33 @@ onBeforeUnmount(() => { disposed = true; if (timer) clearInterval(timer) })
   <div class="modal-overlay">
     <section class="modal-card cpu-dialog" role="dialog" aria-modal="true" aria-labelledby="cpu-protection-title">
       <header class="cpu-heading">
-        <div class="cpu-title"><span class="cpu-icon" aria-hidden="true">▦</span><div><p class="eyebrow">节点资源保护</p><h2 id="cpu-protection-title">CPU 保护</h2><p class="cpu-node">{{ nodeName }}</p></div></div>
+        <div class="cpu-title"><span class="cpu-icon" aria-hidden="true">▦</span><div><h2 id="cpu-protection-title">CPU 保护</h2><p class="cpu-node">{{ nodeName }}</p></div></div>
         <button class="cpu-close" type="button" aria-label="关闭 CPU 保护" :disabled="saving" @click="emit('close')">×</button>
       </header>
       <form @submit.prevent="save">
         <div class="cpu-content">
           <section class="cpu-enable" :class="{ active: form.enabled }">
-            <div><h3>自动保护 <span class="cpu-tag">{{ form.enabled ? '开启' : '关闭' }}</span></h3><p>持续高负载时降低转发处理量，负载回落后逐步恢复。</p></div>
+            <div><h3>自动保护 <span class="cpu-tag">{{ form.enabled ? '开启' : '关闭' }}</span></h3></div>
             <button class="cpu-switch" type="button" role="switch" :aria-checked="form.enabled" aria-label="自动 CPU 保护" :disabled="loading || saving" @click="form.enabled = !form.enabled"><span /></button>
           </section>
           <div class="cpu-status" role="status"><i :class="{ confirmed: !loading && !dirty && configured && applied }" />{{ loading ? '正在读取配置…' : dirty ? '有未保存的修改' : !configured ? '尚未配置' : applied ? 'Agent 已确认生效' : '已保存，等待 Agent 同步确认' }}</div>
           <p v-if="error" class="cpu-error" role="alert">{{ error }}</p>
           <section class="cpu-group">
-            <div class="cpu-group-head"><span class="cpu-step">01</span><div><h3>负载阈值</h3><p>按全部核心的整机 CPU 利用率判断</p></div></div>
+            <div class="cpu-group-head"><span class="cpu-step">01</span><div><h3>负载阈值</h3></div></div>
             <div class="cpu-fields">
-              <label class="cpu-field"><span>触发阈值</span><div class="cpu-input"><input v-model.number="form.high_percent" type="number" min="1" max="100" step="1" required :disabled="loading || saving" /><span>%</span></div><small>连续 15 秒超出此值，开始降额</small></label>
-              <label class="cpu-field"><span>恢复阈值</span><div class="cpu-input"><input v-model.number="form.low_percent" type="number" min="1" max="99" step="1" required :disabled="loading || saving" /><span>%</span></div><small>连续 1 分钟低于此值，逐步恢复</small></label>
+              <label class="cpu-field"><span>触发阈值</span><div class="cpu-input"><input v-model.number="form.high_percent" type="number" min="1" max="100" step="1" required :disabled="loading || saving" /><span>%</span></div></label>
+              <label class="cpu-field"><span>恢复阈值</span><div class="cpu-input"><input v-model.number="form.low_percent" type="number" min="1" max="99" step="1" required :disabled="loading || saving" /><span>%</span></div></label>
             </div>
           </section>
           <section class="cpu-group">
-            <div class="cpu-group-head"><span class="cpu-step">02</span><div><h3>保护配额</h3><p>限制转发服务可使用的整机算力</p></div></div>
+            <div class="cpu-group-head"><span class="cpu-step">02</span><div><h3>保护配额</h3></div></div>
             <div class="cpu-fields">
-              <label class="cpu-field"><span>首次保护配额</span><div class="cpu-input"><input v-model.number="form.max_quota_percent" type="number" min="1" max="100" step="1" required :disabled="loading || saving" /><span>%</span></div><small>触发保护后，先降至此配额</small></label>
-              <label class="cpu-field"><span>最低配额</span><div class="cpu-input"><input v-model.number="form.min_quota_percent" type="number" min="1" max="100" step="1" required :disabled="loading || saving" /><span>%</span></div><small>持续高负载时的配额下限</small></label>
+              <label class="cpu-field"><span>首次保护配额</span><div class="cpu-input"><input v-model.number="form.max_quota_percent" type="number" min="1" max="100" step="1" required :disabled="loading || saving" /><span>%</span></div></label>
+              <label class="cpu-field"><span>最低配额</span><div class="cpu-input"><input v-model.number="form.min_quota_percent" type="number" min="1" max="100" step="1" required :disabled="loading || saving" /><span>%</span></div></label>
             </div>
           </section>
-          <aside class="cpu-note"><span aria-hidden="true">ⓘ</span><p>每 5 秒检测一次，保护不会重启转发服务。内核网络处理及其他程序仍可能使整机超过阈值。</p></aside>
         </div>
-        <footer class="cpu-footer"><span>保存后由节点 Agent 同步执行</span><div><button class="secondary" type="button" :disabled="saving" @click="emit('close')">取消</button><button class="primary" type="submit" :disabled="loading || saving || !dirty">{{ saving ? '保存中…' : '保存并下发' }}</button></div></footer>
+        <footer class="cpu-footer"><div><button class="secondary" type="button" :disabled="saving" @click="emit('close')">取消</button><button class="primary" type="submit" :disabled="loading || saving || !dirty">{{ saving ? '保存中…' : '保存并下发' }}</button></div></footer>
       </form>
     </section>
   </div>
@@ -101,7 +100,6 @@ onBeforeUnmount(() => { disposed = true; if (timer) clearInterval(timer) })
 .cpu-title { display: flex; gap: 14px; align-items: center; min-width: 0; }
 .cpu-title > div { min-width: 0; }
 .cpu-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-border); font-size: 30px; flex-shrink: 0; }
-.cpu-heading .eyebrow { margin: 0 0 3px; font-size: 11px; color: var(--text-muted); }
 .cpu-heading h2 { margin: 0; font-size: 23px; letter-spacing: -.5px; }
 .cpu-node { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
 .cpu-close { width: 32px; height: 32px; border-radius: 9px; background: var(--panel-bg-strong); color: var(--text-muted); font-size: 23px; flex-shrink: 0; }
@@ -110,7 +108,6 @@ onBeforeUnmount(() => { disposed = true; if (timer) clearInterval(timer) })
 .cpu-enable { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px; border: 1px solid var(--panel-border-strong); border-radius: 14px; background: var(--panel-bg-strong); transition: border-color .2s, background .2s; }
 .cpu-enable.active { border-color: var(--accent-border); background: var(--accent-soft); }
 h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-strong); }
-.cpu-enable p, .cpu-group-head p { margin: 6px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.65; }
 .cpu-tag { margin-left: 7px; font-size: 10px; font-weight: 500; color: var(--text-muted); }
 .active .cpu-tag { color: var(--accent); }
 .cpu-switch { padding: 3px; width: 44px; height: 26px; flex-shrink: 0; border-radius: 20px; background: #43516a; transition: background .2s; }
@@ -124,18 +121,13 @@ h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-strong); }
 .cpu-group + .cpu-group { margin-top: 25px; padding-top: 23px; border-top: 1px solid var(--panel-border); }
 .cpu-group-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 16px; }
 .cpu-step { color: var(--accent); font-size: 11px; font-weight: 600; line-height: 22px; }
-.cpu-group-head p { margin-top: 2px; }
 .cpu-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .cpu-field { display: grid; gap: 8px; min-width: 0; font-size: 12px; color: var(--text-main); }
 .cpu-input { display: flex; align-items: center; border: 1px solid var(--panel-border-strong); border-radius: 10px; background: var(--panel-bg-soft); overflow: hidden; }
 .cpu-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .cpu-input input { width: 100%; min-width: 0; padding: 11px 13px; border: 0; outline: none; background: transparent; color: var(--text-strong); font-size: 19px; font-weight: 600; }
 .cpu-input > span { padding-right: 14px; color: var(--text-muted); }
-.cpu-field small { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
-.cpu-note { display: flex; gap: 9px; margin-top: 24px; padding: 12px 14px; background: var(--panel-bg-strong); border-radius: 10px; color: var(--text-muted); }
-.cpu-note p { margin: 0; font-size: 11px; line-height: 1.8; }
-.cpu-footer { position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 28px; border-top: 1px solid var(--panel-border); background: var(--panel-bg-soft); }
-.cpu-footer > span { color: var(--text-muted); font-size: 11px; }
+.cpu-footer { position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding: 18px 28px; border-top: 1px solid var(--panel-border); background: var(--panel-bg-soft); }
 .cpu-footer > div { display: flex; gap: 10px; flex-shrink: 0; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 button:disabled, input:disabled { opacity: .5; cursor: not-allowed; }
