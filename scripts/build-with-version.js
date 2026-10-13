@@ -1,6 +1,10 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
+const projectRoot = fileURLToPath(new URL('..', import.meta.url))
+const assetsDir = fileURLToPath(new URL('../public/assets', import.meta.url))
+const trashRoot = fileURLToPath(new URL('../Trash/public/assets', import.meta.url))
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8'))
 const version = String(pkg.version || '').trim()
 
@@ -14,6 +18,13 @@ const env = {
   VITE_APP_VERSION: version,
 }
 
+if (existsSync(assetsDir)) {
+  mkdirSync(trashRoot, { recursive: true })
+  const suffix = `${Date.now()}-${process.pid}`
+  renameSync(assetsDir, `${trashRoot}/build-${suffix}`)
+}
+mkdirSync(assetsDir, { recursive: true })
+
 for (const command of [
   'npx vue-tsc -b',
   'npx vite build',
@@ -23,6 +34,7 @@ for (const command of [
     stdio: 'inherit',
     shell: true,
     env,
+    cwd: projectRoot,
   })
 
   if (result.status !== 0) {
