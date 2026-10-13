@@ -16,6 +16,7 @@ import (
 	"mxinhy/internal/nodemonitor"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +27,7 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.5"
+const agentVersion = "0.1.6"
 const logDir = "/var/log/mxinhy-agent"
 const agentLogPath = logDir + "/agent.log"
 const hysteriaLogPath = logDir + "/hysteria.log"
@@ -99,9 +100,10 @@ type heartbeatPayload struct {
 }
 
 type heartbeatResponse struct {
-	CPUProtection *cpuProtectionConfig `json:"cpu_protection,omitempty"`
-	Ok            bool                 `json:"ok"`
-	Upgrade       *agentUpgradeInfo    `json:"upgrade"`
+	CPUProtection   *cpuProtectionConfig `json:"cpu_protection,omitempty"`
+	Ok              bool                 `json:"ok"`
+	PanelAPIBaseURL string               `json:"panel_api_base_url,omitempty"`
+	Upgrade         *agentUpgradeInfo    `json:"upgrade"`
 }
 
 type agentUpgradeInfo struct {
@@ -543,6 +545,11 @@ func (a *agent) sendHeartbeat() error {
 	if err := a.postJSON("/agent/heartbeat", payload, &response); err != nil {
 		return err
 	}
+	if response.PanelAPIBaseURL != "" {
+		if err := a.updatePanelAPIBaseURL(response.PanelAPIBaseURL); err != nil {
+			writeLog("warn", "panel API address synchronization skipped: %v", err)
+		}
+	}
 	if response.Upgrade != nil && strings.TrimSpace(response.Upgrade.DownloadURL) != "" {
 		a.scheduleSelfUpgrade(*response.Upgrade)
 	}
@@ -814,6 +821,79 @@ func (a *agent) fetchLogs(lines int, source string) commandResult {
 			"source": source,
 		},
 	}
+}
+
+func (a *agent) panelAPIBaseURL() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return strings.TrimRight(a.cfg.PanelAPIBaseURL, "/")
+}
+
+func (a *agent) updatePanelAPIBaseURL(raw string) error {
+	next, err := normalizePanelAPIBaseURL(raw)
+	if err != nil {
+		return err
+	}
+	if next == a.panelAPIBaseURL() {
+		return nil
+	}
+
+	req, err := http.NewRequest(http.MethodGet, next+"/healthz", nil)
+	if err != nil {
+		return errors.New("new address is invalid")
+	}
+	probeClient := &http.Client{Transport: a.client.Transport, Timeout: 15 * time.Second}
+	response, err := probeClient.Do(req)
+	if err != nil {
+		return errors.New("new address is unreachable")
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("new address health check returned HTTP %d", response.StatusCode)
+	}
+
+	data, err := os.ReadFile(a.cfg.AgentConfigPath)
+	if err != nil {
+		return errors.New("agent configuration could not be read")
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return errors.New("agent configuration is invalid")
+	}
+	payload["panel_api_base_url"], err = json.Marshal(next)
+	if err != nil {
+		return errors.New("agent configuration could not be encoded")
+	}
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return errors.New("agent configuration could not be encoded")
+	}
+	tempPath := a.cfg.AgentConfigPath + ".url-tmp"
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+	if err := os.WriteFile(tempPath, updated, 0o600); err != nil {
+		return errors.New("agent configuration could not be written")
+	}
+	if err := os.Rename(tempPath, a.cfg.AgentConfigPath); err != nil {
+		return errors.New("agent configuration could not be replaced")
+	}
+
+	a.mu.Lock()
+	a.cfg.PanelAPIBaseURL = next
+	a.mu.Unlock()
+	writeLog("info", "panel API address synchronized from panel")
+	return nil
+}
+
+func normalizePanelAPIBaseURL(raw string) (string, error) {
+	value := strings.TrimRight(strings.TrimSpace(raw), "/")
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", errors.New("new address is invalid")
+	}
+	return value, nil
 }
 
 func normalizeLogSource(source string) string {
@@ -1329,7 +1409,7 @@ func (a *agent) postJSON(path string, payload interface{}, target interface{}) e
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(a.cfg.PanelAPIBaseURL, "/")+path, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, a.panelAPIBaseURL()+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
