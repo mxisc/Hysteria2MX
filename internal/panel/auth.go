@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -343,7 +344,24 @@ func httpSafeError(err error, fallback string) string {
 }
 
 func ensureHTTPSOrLocal(request *http.Request) bool {
-	return request.TLS != nil || strings.HasPrefix(request.Host, "127.0.0.1") || strings.HasPrefix(request.Host, "localhost")
+	if request.TLS != nil {
+		return true
+	}
+	host := request.Host
+	if hostname, _, err := net.SplitHostPort(host); err == nil {
+		host = hostname
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	// Only the local reverse proxy may assert the original transport protocol.
+	peer, _, err := net.SplitHostPort(request.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(peer)
+	return ip != nil && ip.IsLoopback() && strings.EqualFold(strings.TrimSpace(request.Header.Get("X-Forwarded-Proto")), "https")
 }
 
 func parseDisplayName(username string) string {
