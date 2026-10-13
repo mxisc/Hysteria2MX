@@ -493,6 +493,9 @@ func (a *App) handleAgentHeartbeat(writer http.ResponseWriter, request *http.Req
 		if upgrade := a.hysteria.buildAgentUpgradeInstruction(record, payload, agentAPIBaseURL); upgrade != nil {
 			result["upgrade"] = upgrade
 		}
+		if configuredAPIBaseURL := normalizePublicAPIBaseURL(a.config.PublicAPIBaseURL); configuredAPIBaseURL != "" {
+			result["panel_api_base_url"] = configuredAPIBaseURL
+		}
 	}
 	a.writeJSON(writer, http.StatusOK, apiEnvelope{Success: true, Data: result})
 }

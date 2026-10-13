@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -94,5 +96,72 @@ func TestNormalizeLogSource(t *testing.T) {
 	}
 	if got := normalizeLogSource("unknown"); got != logSourceService {
 		t.Fatalf("normalizeLogSource(unknown) = %q", got)
+	}
+}
+
+func TestUpdatePanelAPIBaseURLProbesAndPersists(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/healthz" {
+			t.Fatalf("probe path = %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "agent.json")
+	if err := os.WriteFile(configPath, []byte(`{"panel_api_base_url":"https://old.example.com/api","unknown":"preserved"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := &agent{
+		client: server.Client(),
+		cfg: config{
+			PanelAPIBaseURL: "https://old.example.com/api",
+			AgentConfigPath: configPath,
+		},
+	}
+	next := server.URL + "/api"
+	if err := a.updatePanelAPIBaseURL(next); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.panelAPIBaseURL(); got != next {
+		t.Fatalf("panel API URL = %q, want %q", got, next)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted map[string]any
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted["panel_api_base_url"] != next || persisted["unknown"] != "preserved" {
+		t.Fatalf("persisted config = %#v", persisted)
+	}
+}
+
+func TestUpdatePanelAPIBaseURLKeepsCurrentAddressWhenProbeFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "agent.json")
+	const current = "https://old.example.com/api"
+	if err := os.WriteFile(configPath, []byte(`{"panel_api_base_url":"`+current+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := &agent{
+		client: server.Client(),
+		cfg: config{
+			PanelAPIBaseURL: current,
+			AgentConfigPath: configPath,
+		},
+	}
+	if err := a.updatePanelAPIBaseURL(server.URL + "/api"); err == nil {
+		t.Fatal("expected failed health check")
+	}
+	if got := a.panelAPIBaseURL(); got != current {
+		t.Fatalf("panel API URL changed to %q", got)
 	}
 }

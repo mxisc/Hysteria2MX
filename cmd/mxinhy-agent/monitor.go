@@ -229,7 +229,7 @@ func (a *agent) uploadMetrics(ctx context.Context, client *http.Client, m nodemo
 	if e != nil {
 		return e
 	}
-	req, e := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(a.cfg.PanelAPIBaseURL, "/")+"/agent/metrics", bytes.NewReader(body))
+	req, e := http.NewRequestWithContext(ctx, http.MethodPost, a.panelAPIBaseURL()+"/agent/metrics", bytes.NewReader(body))
 	if e != nil {
 		return e
 	}
