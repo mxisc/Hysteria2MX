@@ -2869,7 +2869,7 @@ func (s *hysteriaService) buildAgentBinaryDownloadURL(panelAPIBaseURL string, ta
 	return strings.TrimRight(panelAPIBaseURL, "/") + "/agent/download/" + url.QueryEscape(target) + "?agent_id=" + url.QueryEscape(agentID) + "&expires=" + strconv.FormatInt(expiresAt, 10) + "&signature=" + url.QueryEscape(signature)
 }
 
-func (s *hysteriaService) buildAgentUpgradeInstruction(record map[string]any, payload map[string]any) map[string]any {
+func (s *hysteriaService) buildAgentUpgradeInstruction(record map[string]any, payload map[string]any, agentAPIBaseURL string) map[string]any {
 	if s == nil || s.cfg == nil || s.agents == nil || record == nil {
 		return nil
 	}
@@ -2881,7 +2881,10 @@ func (s *hysteriaService) buildAgentUpgradeInstruction(record map[string]any, pa
 	if target != "linux-amd64" && target != "linux-arm64" {
 		return nil
 	}
-	apiBaseURL := normalizePublicAPIBaseURL(s.cfg.PublicAPIBaseURL)
+	apiBaseURL := normalizePublicAPIBaseURL(agentAPIBaseURL)
+	if apiBaseURL == "" {
+		apiBaseURL = normalizePublicAPIBaseURL(s.cfg.PublicAPIBaseURL)
+	}
 	if apiBaseURL == "" {
 		return nil
 	}
