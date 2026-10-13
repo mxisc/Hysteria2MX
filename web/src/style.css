@@ -2204,6 +2204,43 @@ button {
   min-height: 0;
 }
 
+.logs-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.log-source-switch {
+  display: grid;
+  grid-template-columns: repeat(2, 72px);
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 8px;
+  background: rgba(8, 17, 32, 0.72);
+}
+
+.log-source-switch button {
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.log-source-switch button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.log-source-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .logs-panel-card {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -2646,10 +2683,15 @@ button {
 
   .logs-filter-toolbar,
   .logs-filter-actions,
+  .logs-panel-actions,
   .audit-pagination,
   .mail-hero-card {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .log-source-switch {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .logs-filter-actions .node-filter-select {

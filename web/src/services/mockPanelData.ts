@@ -5,6 +5,7 @@ import type {
   HysteriaPanelState,
   HysteriaStreamItem,
   HysteriaUser,
+  NodeLogSource,
   NodeTrafficHistoryItem,
   RemoteCommandResult,
   ServiceAction,
@@ -140,11 +141,24 @@ export function mockServiceResult(action: ServiceAction, nodeId = defaultMockNod
   }
 }
 
-export function getMockLogs(nodeId?: number | null): RemoteCommandResult {
+export function getMockLogs(nodeId?: number | null, source: NodeLogSource = 'service'): RemoteCommandResult {
   const nodes = getMockNodes()
   const users = getMockUsers()
   const node = nodes.find((item) => item.id === (nodeId ?? defaultMockNodeId)) ?? nodes[0]
   const status = deriveNodeStatus(node)
+  if (source === 'agent') {
+    return {
+      command: `mock tail -n 80 ${node.agent_service_name}`,
+      output: [
+        '[2026-06-04 20:00:10][info] agent starting: version=0.1.5',
+        `[2026-06-04 20:00:11][info] agent registered: node_id=${node.id} service=${node.service_name}`,
+        '[2026-06-04 20:10:00][info] agent upgrade requested: current=0.1.4 target=0.1.5',
+        '[2026-06-04 20:10:00][info] agent upgrade download started: current=0.1.4 target=0.1.5',
+        '[2026-06-04 20:10:02][info] agent upgraded to 0.1.5; service restart scheduled',
+      ].join('\n'),
+      exitCode: status === 'stopped' ? 1 : 0,
+    }
+  }
   const lines = Array.from({ length: 80 }, (_, index) => {
     const level = index % 17 === 0 ? 'WARN' : status === 'degraded' && index % 9 === 0 ? 'ERROR' : 'INFO'
     const user = users[index % users.length]

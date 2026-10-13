@@ -15,6 +15,7 @@ import type {
   PaginatedResult,
   HysteriaStreamItem,
   NotificationSettings,
+  NodeLogSource,
   PublicAppSettings,
   SystemHealth,
   SystemSettings,
@@ -246,12 +247,15 @@ export async function performServiceAction(action: ServiceAction, nodeId?: numbe
   })
 }
 
-export async function fetchLogs(nodeId?: number | null): Promise<RemoteCommandResult> {
+export async function fetchLogs(nodeId?: number | null, source: NodeLogSource = 'service'): Promise<RemoteCommandResult> {
   if (await shouldUseMockPanel()) {
-    return getMockLogs(nodeId)
+    return getMockLogs(nodeId, source)
   }
-  const suffix = nodeId ? `?node_id=${nodeId}` : ''
-  return request<RemoteCommandResult>(`/hysteria/logs${suffix}`)
+  const params = new URLSearchParams({ source })
+  if (nodeId) {
+    params.set('node_id', String(nodeId))
+  }
+  return request<RemoteCommandResult>(`/hysteria/logs?${params.toString()}`)
 }
 
 export async function fetchOnlineClients(nodeId?: number | null): Promise<HysteriaOnlineClient[]> {

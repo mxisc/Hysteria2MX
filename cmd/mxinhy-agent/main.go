@@ -26,10 +26,12 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.4"
+const agentVersion = "0.1.5"
 const logDir = "/var/log/mxinhy-agent"
 const agentLogPath = logDir + "/agent.log"
 const hysteriaLogPath = logDir + "/hysteria.log"
+const logSourceAgent = "agent"
+const logSourceService = "service"
 const heartbeatFailureGraceMultiplier = 3
 const defaultLocalAuthListen = "127.0.0.1:18081"
 const defaultLocalAuthStatePath = "/var/lib/mxinhy-agent/local-auth.json"
@@ -201,6 +203,7 @@ func main() {
 	if err := setupFileLogging(); err != nil {
 		fatal(err)
 	}
+	writeLog("info", "agent starting: version=%s", agentVersion)
 
 	a := &agent{
 		cfg: cfg,
@@ -459,6 +462,7 @@ func (a *agent) applySelfUpgrade(upgrade agentUpgradeInfo) error {
 	if version == "" || version == agentVersion {
 		return nil
 	}
+	writeLog("info", "agent upgrade download started: current=%s target=%s", agentVersion, version)
 	executablePath := strings.TrimSpace(a.cfg.AgentInstallPath)
 	if executablePath == "" {
 		return errors.New("agent executable path is empty")
@@ -467,14 +471,16 @@ func (a *agent) applySelfUpgrade(upgrade agentUpgradeInfo) error {
 	downloadClient := &http.Client{Transport: a.client.Transport, Timeout: 5 * time.Minute}
 	response, err := downloadClient.Get(strings.TrimSpace(upgrade.DownloadURL))
 	if err != nil {
-		return err
+		return errors.New("upgrade download request failed")
 	}
 	defer response.Body.Close()
 	if response.StatusCode >= 400 {
-		body, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("agent upgrade download failed: %s", strings.TrimSpace(string(body)))
+		return fmt.Errorf("upgrade download returned HTTP %d", response.StatusCode)
 	}
 	tmpPath := executablePath + ".upgrade.tmp"
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
 	file, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		return err
@@ -492,10 +498,16 @@ func (a *agent) applySelfUpgrade(upgrade agentUpgradeInfo) error {
 	if err := os.Rename(tmpPath, executablePath); err != nil {
 		return err
 	}
-	writeLog("info", "agent upgraded to %s; restarting service", version)
+	writeLog("info", "agent upgraded to %s; service restart scheduled", version)
 	go func() {
 		time.Sleep(500 * time.Millisecond)
-		_, _ = runCommand("systemctl restart " + shellQuote(a.cfg.AgentServiceName))
+		writeLog("info", "agent service restart started after upgrade to %s", version)
+		if _, err := runCommand("systemctl restart " + shellQuote(a.cfg.AgentServiceName)); err != nil {
+			writeLog("error", "agent service restart failed after upgrade to %s; the panel will retry", version)
+			a.mu.Lock()
+			a.selfUpgrading = false
+			a.mu.Unlock()
+		}
 	}()
 	return nil
 }
@@ -552,9 +564,10 @@ func (a *agent) scheduleSelfUpgrade(upgrade agentUpgradeInfo) {
 	}
 	a.selfUpgrading = true
 	a.mu.Unlock()
+	writeLog("info", "agent upgrade requested: current=%s target=%s", agentVersion, upgrade.Version)
 	go func() {
 		if err := a.applySelfUpgrade(upgrade); err != nil {
-			writeLog("warn", "agent upgrade failed; continuing heartbeat and configuration synchronization")
+			writeLog("warn", "agent upgrade to %s failed: %v; heartbeat and configuration synchronization continue", upgrade.Version, err)
 			a.mu.Lock()
 			a.selfUpgrading = false
 			a.mu.Unlock()
@@ -627,7 +640,7 @@ func (a *agent) executeTask(task task) commandResult {
 		return a.serviceAction("status", false)
 	case 5:
 		lines := intFromPayload(task.Payload, "lines", 200)
-		return a.fetchLogs(lines)
+		return a.fetchLogs(lines, stringFromPayload(task.Payload, "source", logSourceService))
 	case 6:
 		return a.fetchOnline()
 	case 7:
@@ -766,10 +779,7 @@ func (a *agent) serviceAction(action string, refreshSummary bool) commandResult 
 	}
 }
 
-func (a *agent) fetchLogs(lines int) commandResult {
-	if err := a.ensureServiceFileLogging(); err != nil {
-		return commandResult{ExitCode: 1, Output: err.Error()}
-	}
+func (a *agent) fetchLogs(lines int, source string) commandResult {
 	if lines < 10 {
 		lines = 10
 	}
@@ -777,7 +787,16 @@ func (a *agent) fetchLogs(lines int) commandResult {
 		lines = 500
 	}
 
-	output, err := runCommand(fmt.Sprintf("tail -n %d %s", lines, shellQuote(hysteriaLogPath)))
+	source = normalizeLogSource(source)
+	logPath := agentLogPath
+	if source == logSourceService {
+		if err := a.ensureServiceFileLogging(); err != nil {
+			return commandResult{ExitCode: 1, Output: err.Error()}
+		}
+		logPath = hysteriaLogPath
+	}
+
+	output, err := runCommand(fmt.Sprintf("tail -n %d %s", lines, shellQuote(logPath)))
 	exitCode := 0
 	if err != nil {
 		exitCode = exitCodeFromErr(err)
@@ -791,9 +810,17 @@ func (a *agent) fetchLogs(lines int) commandResult {
 		ExitCode: exitCode,
 		Output:   trimOutput(output),
 		Data: map[string]interface{}{
-			"logs": trimOutput(output),
+			"logs":   trimOutput(output),
+			"source": source,
 		},
 	}
+}
+
+func normalizeLogSource(source string) string {
+	if strings.EqualFold(strings.TrimSpace(source), logSourceAgent) {
+		return logSourceAgent
+	}
+	return logSourceService
 }
 
 func (a *agent) fetchOnline() commandResult {
@@ -1449,6 +1476,18 @@ func intFromPayload(payload map[string]interface{}, key string, fallback int) in
 		return fallback
 	}
 	return int(numberFromAny(raw))
+}
+
+func stringFromPayload(payload map[string]interface{}, key string, fallback string) string {
+	raw, ok := payload[key]
+	if !ok {
+		return fallback
+	}
+	value := strings.TrimSpace(fmt.Sprintf("%v", raw))
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func boolFromPayload(payload map[string]interface{}, key string, fallback bool) bool {
