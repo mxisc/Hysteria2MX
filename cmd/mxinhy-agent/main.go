@@ -27,7 +27,7 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.6"
+const agentVersion = "0.1.7"
 const logDir = "/var/log/mxinhy-agent"
 const agentLogPath = logDir + "/agent.log"
 const hysteriaLogPath = logDir + "/hysteria.log"
@@ -815,9 +815,9 @@ func (a *agent) fetchLogs(lines int, source string) commandResult {
 
 	return commandResult{
 		ExitCode: exitCode,
-		Output:   trimOutput(output),
+		Output:   trimRecentOutput(output),
 		Data: map[string]interface{}{
-			"logs":   trimOutput(output),
+			"logs":   trimRecentOutput(output),
 			"source": source,
 		},
 	}
@@ -1630,6 +1630,18 @@ func trimOutput(value string) string {
 		return value
 	}
 	return value[:8000]
+}
+
+func trimRecentOutput(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 8000 {
+		return value
+	}
+	value = value[len(value)-8000:]
+	if newline := strings.IndexByte(value, '\n'); newline >= 0 {
+		value = value[newline+1:]
+	}
+	return strings.TrimSpace(value)
 }
 
 func humanBytes(value int64) string {
