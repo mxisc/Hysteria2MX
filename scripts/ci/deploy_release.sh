@@ -20,6 +20,10 @@ REMOTE_SHARED_DIR="${DEPLOY_PATH}/shared"
 SSH_TARGET="${DEPLOY_USER}@${DEPLOY_HOST}"
 SSH_OPTS=(-p "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes)
 SCP_OPTS=(-P "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+if [ -n "${DEPLOY_KNOWN_HOSTS_FILE:-}" ]; then
+  SSH_OPTS+=(-o "UserKnownHostsFile=${DEPLOY_KNOWN_HOSTS_FILE}")
+  SCP_OPTS+=(-o "UserKnownHostsFile=${DEPLOY_KNOWN_HOSTS_FILE}")
+fi
 
 scp "${SCP_OPTS[@]}" "$PACKAGE_PATH" "${SSH_TARGET}:${REMOTE_PACKAGE}"
 
