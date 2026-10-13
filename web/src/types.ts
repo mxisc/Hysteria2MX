@@ -1,6 +1,7 @@
 export type ServiceStatus = 'running' | 'degraded' | 'stopped'
 export type UserStatus = 'active' | 'suspended'
 export type ServiceAction = 'start' | 'stop' | 'restart' | 'status' | 'upgrade-agent'
+export type NodeLogSource = 'service' | 'agent'
 export type TlsMode = 'acme' | 'self_signed'
 export type AdminRole = 'super_admin' | 'operator' | 'auditor' | 'viewer'
 export type AdminStatus = 'active' | 'disabled'

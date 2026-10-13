@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -64,5 +65,34 @@ func TestUpgradeDoesNotBlockOrDuplicateControlRequests(t *testing.T) {
 	case <-entered:
 	case <-time.After(time.Second):
 		t.Fatal("failed upgrade not retried")
+	}
+}
+
+func TestUpgradeHTTPErrorDoesNotExposeResponseBody(t *testing.T) {
+	const sensitiveBody = "signed download details must stay private"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, sensitiveBody, http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	a := &agent{client: server.Client(), cfg: config{AgentInstallPath: filepath.Join(t.TempDir(), "agent")}}
+	err := a.applySelfUpgrade(agentUpgradeInfo{Version: "test-next", DownloadURL: server.URL})
+	if err == nil {
+		t.Fatal("expected upgrade error")
+	}
+	if !strings.Contains(err.Error(), "HTTP 502") {
+		t.Fatalf("unexpected upgrade error: %v", err)
+	}
+	if strings.Contains(err.Error(), sensitiveBody) {
+		t.Fatal("upgrade error exposed response body")
+	}
+}
+
+func TestNormalizeLogSource(t *testing.T) {
+	if got := normalizeLogSource(" Agent "); got != logSourceAgent {
+		t.Fatalf("normalizeLogSource(agent) = %q", got)
+	}
+	if got := normalizeLogSource("unknown"); got != logSourceService {
+		t.Fatalf("normalizeLogSource(unknown) = %q", got)
 	}
 }

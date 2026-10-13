@@ -69,6 +69,7 @@ import type {
   HysteriaUser,
   HysteriaUserPayload,
   LoginBackgroundConfig,
+  NodeLogSource,
   NotificationSettings,
   NodeTrafficHistoryItem,
   PaginationMeta,
@@ -562,6 +563,7 @@ const subscriptionUserId = ref<number | null>(null)
 const toastMessage = ref('')
 const toastType = ref<ToastType>('success')
 const selectedLogNodeId = ref<number | null>(null)
+const selectedLogSource = ref<NodeLogSource>('service')
 const pendingDeleteUser = ref<HysteriaUser | null>(null)
 const pendingDeleteNode = ref<HysteriaNodeConfig | null>(null)
 const pendingDeleteAdmin = ref<AdminUser | null>(null)
@@ -1419,7 +1421,11 @@ async function loadLogs() {
     return
   }
 
-  const result = await fetchLogs(selectedLogNodeId.value)
+  const source = selectedLogSource.value
+  const result = await fetchLogs(selectedLogNodeId.value, source)
+  if (source !== selectedLogSource.value) {
+    return
+  }
   logsText.value = result.output || '暂无日志输出'
   logsLoaded.value = true
   scrollRealtimeLogPanels()
@@ -2016,9 +2022,32 @@ async function handleRefreshLogs() {
     return
   }
 
-  const result = await withBusyAction('logs', () => fetchLogs(selectedLogNodeId.value), '已刷新远端日志', false)
+  const source = selectedLogSource.value
+  const result = await withBusyAction(
+    'logs',
+    () => fetchLogs(selectedLogNodeId.value, source),
+    source === 'agent' ? '已刷新 Agent 日志' : '已刷新服务日志',
+    false,
+  )
+  if (source !== selectedLogSource.value) {
+    return
+  }
   logsText.value = result.output || '暂无日志输出'
   logsLoaded.value = true
+  scrollRealtimeLogPanels()
+}
+
+async function handleLogSourceChange(source: NodeLogSource) {
+  if (source === selectedLogSource.value || (source === 'agent' && !selectedLogNodeUsesAgent.value)) {
+    return
+  }
+  selectedLogSource.value = source
+  logsLoaded.value = false
+  try {
+    await handleRefreshLogs()
+  } catch {
+    logsText.value = '日志加载失败'
+  }
 }
 
 async function handleRefreshAuditLogs() {
@@ -2030,6 +2059,9 @@ async function handleLogNodeChange() {
   auditLogsLoaded.value = false
   auditLogPage.value = 1
   stopAuditLogAutoRefreshTimer()
+  if (!selectedLogNodeUsesAgent.value) {
+    selectedLogSource.value = 'service'
+  }
 
   if (currentSection.value !== 'logsAudit' || !session.value) {
     return
@@ -3052,9 +3084,29 @@ async function handleSendTestNotification() {
             <div class="section-head section-head-wrap">
               <div>
                 <p class="eyebrow">节点日志</p>
-                <h3>远端运行日志</h3>
+                <h3>{{ selectedLogSource === 'agent' ? 'Agent 运行日志' : 'Hysteria 运行日志' }}</h3>
               </div>
-              <button v-if="hasPermission('logs.view')" class="secondary" :disabled="busyAction !== '' || !selectedLogNodeId || realtimeLogRefreshEnabled" @click="handleRefreshLogs">刷新日志</button>
+              <div v-if="hasPermission('logs.view')" class="logs-panel-actions">
+                <div class="log-source-switch" role="group" aria-label="日志来源">
+                  <button
+                    type="button"
+                    :class="{ active: selectedLogSource === 'service' }"
+                    :disabled="busyAction !== ''"
+                    @click="handleLogSourceChange('service')"
+                  >
+                    服务
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: selectedLogSource === 'agent' }"
+                    :disabled="busyAction !== '' || !selectedLogNodeUsesAgent"
+                    @click="handleLogSourceChange('agent')"
+                  >
+                    Agent
+                  </button>
+                </div>
+                <button class="secondary" :disabled="busyAction !== '' || !selectedLogNodeId || realtimeLogRefreshEnabled" @click="handleRefreshLogs">刷新日志</button>
+              </div>
             </div>
             <pre ref="logsOutputRef" class="terminal-output large-terminal">{{
               hasPermission('logs.view') ? (logsText || '暂无日志输出') : '当前角色无权查看日志'

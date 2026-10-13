@@ -1304,7 +1304,7 @@ func (a *App) handleHysteriaLogs(writer http.ResponseWriter, request *http.Reque
 	if !ok || !requirePermission(user, "logs.view", writer) {
 		return
 	}
-	result, err := a.hysteria.logs(request.Context(), readOptionalNodeID(request))
+	result, err := a.hysteria.logs(request.Context(), readOptionalNodeID(request), request.URL.Query().Get("source"))
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, httpSafeError(err, "节点日志读取失败"))
 		return

@@ -42,3 +42,12 @@ func TestBuildUserTrafficStatsItemsFiltersAndFormatsCachedPayload(t *testing.T) 
 		t.Fatalf("rx_human = %q, want 1.00 MB", got)
 	}
 }
+
+func TestNormalizeNodeLogSource(t *testing.T) {
+	if got := normalizeNodeLogSource(" Agent "); got != "agent" {
+		t.Fatalf("normalizeNodeLogSource(agent) = %q", got)
+	}
+	if got := normalizeNodeLogSource("unknown"); got != "service" {
+		t.Fatalf("normalizeNodeLogSource(unknown) = %q", got)
+	}
+}

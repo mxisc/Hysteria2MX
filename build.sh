@@ -52,23 +52,20 @@ if git ls-remote --tags origin "refs/tags/${TAG_NAME}" | grep -q "${TAG_NAME}"; 
   exit 1
 fi
 
-# 更新 package.json
-node -e "
-const pkg = require('./package.json');
-pkg.version = '${NEW_VERSION}';
-require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-"
+# 同步更新 package.json 与 package-lock.json。
+npm version "${NEW_VERSION}" --no-git-tag-version --ignore-scripts >/dev/null
+npm run build
 
 # 提交并推送
 echo "提交本地改动和版本变更..."
 git add -A
-git commit -m "chore: release v${NEW_VERSION}"
+git commit -m "发布 v${NEW_VERSION}"
 
 echo "推送代码到远程..."
 git push origin main
 
 echo "创建发布标签..."
-git tag -a "${TAG_NAME}" -m "Release ${TAG_NAME}"
+git tag -a "${TAG_NAME}" -m "发布 ${TAG_NAME}"
 
 echo "推送发布标签..."
 git push origin "${TAG_NAME}"

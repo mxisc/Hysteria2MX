@@ -2466,24 +2466,35 @@ func (s *hysteriaService) upgradeAgent(ctx context.Context, node nodeRecord, api
 	return result, nil
 }
 
-func (s *hysteriaService) logs(ctx context.Context, nodeID int64) (map[string]any, error) {
+func (s *hysteriaService) logs(ctx context.Context, nodeID int64, source string) (map[string]any, error) {
 	node, err := s.getNodeOrCurrent(ctx, nodeID)
 	if err != nil || node == nil {
 		return nil, errors.New("请先保存节点配置")
 	}
+	source = normalizeNodeLogSource(source)
 	if s.shouldUseAgent(*node) {
-		result, err := s.runAgentTask(ctx, *node, opcodeFetchLogs, map[string]any{"lines": 200}, 20)
+		result, err := s.runAgentTask(ctx, *node, opcodeFetchLogs, map[string]any{"lines": 200, "source": source}, 20)
 		if err != nil {
 			return nil, err
 		}
 		payload := mapValue(result["payload"])
 		return map[string]any{
-			"command":  "agent:logs",
+			"command":  "agent:" + source + "-logs",
 			"output":   strings.TrimSpace(defaultString(toString(payload["logs"]), toString(result["output"]))),
 			"exitCode": intValue(result["exitCode"]),
 		}, nil
 	}
+	if source == "agent" {
+		return nil, errors.New("该节点未启用 Agent，无法读取 Agent 日志")
+	}
 	return s.remote.run(*node, `tail -n 50 /var/log/mxinhy-agent/hysteria.log 2>/dev/null || echo "节点日志文件尚未生成，请先通过 Agent 重新下发配置或重启服务以启用文件日志"`, "")
+}
+
+func normalizeNodeLogSource(source string) string {
+	if strings.EqualFold(strings.TrimSpace(source), "agent") {
+		return "agent"
+	}
+	return "service"
 }
 
 func (s *hysteriaService) syncTrafficUsage(ctx context.Context, clear bool, nodeID int64) (map[string]any, error) {

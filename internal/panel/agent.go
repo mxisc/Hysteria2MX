@@ -20,7 +20,7 @@ const (
 	agentStatusOnline   = "online"
 	agentStatusOffline  = "offline"
 	agentStatusError    = "error"
-	currentAgentVersion = "0.1.4"
+	currentAgentVersion = "0.1.5"
 
 	taskStatusPending = "pending"
 	taskStatusRunning = "running"
