@@ -58,6 +58,16 @@ go build -o build/panel/mxinhy-panel ./cmd/mxinhy-panel
 
 生产环境建议使用 Nginx 或 Caddy 将公网 HTTPS 入口反向代理到面板监听地址，例如 `127.0.0.1:18080`。
 
+登录校验仅信任本机反向代理传递的 HTTPS 协议。Nginx 的面板代理配置应保留原始 Host，并覆盖协议头：
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_pass http://127.0.0.1:18080;
+```
+
+请在 HTTPS 入口配置这些指令；使用 CDN 时也应确保 CDN 到此入口使用 HTTPS。
+
 最小配置示例见 `config/panel.env.example`：
 
 ```env
