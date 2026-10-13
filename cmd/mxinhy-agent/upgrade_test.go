@@ -99,6 +99,18 @@ func TestNormalizeLogSource(t *testing.T) {
 	}
 }
 
+func TestTrimRecentOutputKeepsNewestCompleteLines(t *testing.T) {
+	oldLine := strings.Repeat("a", 5000)
+	newLine := strings.Repeat("b", 5000)
+	got := trimRecentOutput(oldLine + "\n" + newLine)
+	if strings.Contains(got, oldLine) {
+		t.Fatal("old log content was retained")
+	}
+	if got != newLine {
+		t.Fatalf("recent log content length = %d, want %d", len(got), len(newLine))
+	}
+}
+
 func TestUpdatePanelAPIBaseURLProbesAndPersists(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/healthz" {
