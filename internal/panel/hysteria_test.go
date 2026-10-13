@@ -1,6 +1,9 @@
 package panel
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestComputeTrafficDeltaWithoutPreviousSnapshot(t *testing.T) {
 	if got := computeTrafficDelta(1024, 0, false); got != 0 {
@@ -49,5 +52,21 @@ func TestNormalizeNodeLogSource(t *testing.T) {
 	}
 	if got := normalizeNodeLogSource("unknown"); got != "service" {
 		t.Fatalf("normalizeNodeLogSource(unknown) = %q", got)
+	}
+}
+
+func TestBuildAgentUpgradeInstructionUsesReachableHeartbeatURL(t *testing.T) {
+	service := &hysteriaService{
+		cfg:    &Config{PublicAPIBaseURL: "https://new.example.com/api"},
+		agents: &agentService{},
+	}
+	instruction := service.buildAgentUpgradeInstruction(
+		map[string]any{"agent_id": "agent-1", "shared_secret": "secret"},
+		map[string]any{"version": "0.1.4", "target": "linux-amd64"},
+		"https://old.example.com/api",
+	)
+	downloadURL := toString(instruction["download_url"])
+	if !strings.HasPrefix(downloadURL, "https://old.example.com/api/agent/download/linux-amd64?") {
+		t.Fatalf("download URL = %q", downloadURL)
 	}
 }

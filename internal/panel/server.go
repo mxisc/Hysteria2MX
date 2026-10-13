@@ -489,7 +489,8 @@ func (a *App) handleAgentHeartbeat(writer http.ResponseWriter, request *http.Req
 		if quotaErr := a.hysteria.enforceRealtimeTrafficQuota(request.Context(), int64Value(payload["node_id"]), mapValue(payload["user_traffic"])); quotaErr != nil && a.logger != nil {
 			a.logger.Errorf("agent heartbeat quota enforcement failed: %v", quotaErr)
 		}
-		if upgrade := a.hysteria.buildAgentUpgradeInstruction(record, payload); upgrade != nil {
+		agentAPIBaseURL := normalizePublicAPIBaseURL(resolvePublicBaseURL(request))
+		if upgrade := a.hysteria.buildAgentUpgradeInstruction(record, payload, agentAPIBaseURL); upgrade != nil {
 			result["upgrade"] = upgrade
 		}
 	}
