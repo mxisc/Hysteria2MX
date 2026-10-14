@@ -27,7 +27,7 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.7"
+const agentVersion = "0.1.8"
 const logDir = "/var/log/mxinhy-agent"
 const agentLogPath = logDir + "/agent.log"
 const hysteriaLogPath = logDir + "/hysteria.log"

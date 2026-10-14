@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"mxinhy/internal/nodemonitor"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,6 +19,102 @@ func TestMonitorMemoryUsesAvailableAndSwap(t *testing.T) {
 	}
 	if _, _, _, _, e = parseMemory("MemTotal: 10 kB\nMemAvailable: 20 kB\n"); e == nil {
 		t.Fatal("invalid memory counters accepted")
+	}
+}
+
+func TestMonitorRetryPreservesSamplesAndOrder(t *testing.T) {
+	var mu sync.Mutex
+	var attempts []int64
+	stored := make(map[int64]bool)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m nodemonitor.Metrics
+		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+			t.Error(err)
+			w.WriteHeader(400)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		attempts = append(attempts, m.SampledAtMS)
+		// Simulate a saved sample whose acknowledgement was lost. Retrying must
+		// preserve its timestamp so the panel's existing unique key deduplicates it.
+		stored[m.SampledAtMS] = true
+		if len(attempts) <= 2 {
+			w.WriteHeader(503)
+		}
+	}))
+	defer server.Close()
+	a := &agent{cfg: config{PanelAPIBaseURL: server.URL}}
+	queue := make(chan nodemonitor.Metrics, 3)
+	now := time.Now().UnixMilli()
+	for i := int64(0); i < 3; i++ {
+		queue <- nodemonitor.Metrics{SampledAtMS: now - 10000 + i*5000}
+	}
+	close(queue)
+	a.runMonitorUploader(context.Background(), queue, server.Client(), time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(stored) != 3 || len(attempts) != 5 || attempts[0] != attempts[1] || attempts[1] != attempts[2] || attempts[3] != now-5000 || attempts[4] != now {
+		t.Fatalf("buffered samples lost or reordered: %v", attempts)
+	}
+}
+
+func TestMonitorUploaderSkipsExpiredSample(t *testing.T) {
+	var count atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { count.Add(1) }))
+	defer server.Close()
+	a := &agent{cfg: config{PanelAPIBaseURL: server.URL}}
+	queue := make(chan nodemonitor.Metrics, 2)
+	queue <- nodemonitor.Metrics{SampledAtMS: time.Now().Add(-time.Minute).UnixMilli()}
+	queue <- nodemonitor.Metrics{SampledAtMS: time.Now().UnixMilli()}
+	close(queue)
+	a.runMonitorUploader(context.Background(), queue, server.Client(), time.Millisecond)
+	if count.Load() != 1 {
+		t.Fatal("expired sample blocked fresh sample")
+	}
+}
+
+func TestMonitorUploaderRetriesTransportTimeout(t *testing.T) {
+	var count atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if count.Add(1) == 1 {
+			time.Sleep(30 * time.Millisecond)
+		}
+	}))
+	defer server.Close()
+	a := &agent{cfg: config{PanelAPIBaseURL: server.URL}}
+	queue := make(chan nodemonitor.Metrics, 1)
+	queue <- nodemonitor.Metrics{SampledAtMS: time.Now().UnixMilli()}
+	close(queue)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	a.runMonitorUploader(ctx, queue, &http.Client{Timeout: 10 * time.Millisecond}, time.Millisecond)
+	if ctx.Err() != nil || count.Load() < 2 {
+		t.Fatal("timed-out sample was not retried successfully")
+	}
+}
+
+func TestMonitorUploaderCancelsRetry(t *testing.T) {
+	started := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503); started <- struct{}{} }))
+	defer server.Close()
+	a := &agent{cfg: config{PanelAPIBaseURL: server.URL}}
+	queue := make(chan nodemonitor.Metrics, 1)
+	queue <- nodemonitor.Metrics{SampledAtMS: time.Now().UnixMilli()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { a.runMonitorUploader(ctx, queue, server.Client(), time.Hour); close(done) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("upload did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation blocked by retry delay")
 	}
 }
 
@@ -58,8 +156,8 @@ func TestBlockedMetricsUploadDoesNotBlockCollection(t *testing.T) {
 	defer cancel()
 	var count atomic.Int64
 	a.startMonitorWorkers(ctx, func() (systemSample, error) {
-		n := count.Add(1)
-		return systemSample{at: time.Now(), metrics: nodemonitor.Metrics{SampledAtMS: n}}, nil
+		count.Add(1)
+		return systemSample{at: time.Now(), metrics: nodemonitor.Metrics{SampledAtMS: time.Now().UnixMilli()}}, nil
 	}, 10*time.Millisecond)
 	select {
 	case <-started:

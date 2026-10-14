@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mxinhy/internal/nodemonitor"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,6 +17,8 @@ import (
 )
 
 const monitorInterval = 5 * time.Second
+const monitorBufferSize = 12
+const monitorRetention = 45 * time.Second
 
 type systemSample struct {
 	cpu     cpuSample
@@ -161,29 +165,26 @@ func sampleRates(previous, next systemSample) nodemonitor.Metrics {
 	return m
 }
 
-// Collection and upload have separate workers and a one-sample queue. Slow or
+// Collection and upload have separate workers and a bounded retry queue. Slow or
 // unavailable panels cannot block sampling, heartbeat, or command processing.
 func (a *agent) startMonitoring(ctx context.Context) {
 	a.startMonitorWorkers(ctx, readSystemSample, monitorInterval)
 }
 
 func (a *agent) startMonitorWorkers(ctx context.Context, collect func() (systemSample, error), interval time.Duration) {
-	queue := make(chan nodemonitor.Metrics, 1)
-	go func() {
-		client := &http.Client{Timeout: 4 * time.Second}
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case m := <-queue:
-				_ = a.uploadMetrics(ctx, client, m) // The next sample retries; stale state is visible in the panel.
-			}
-		}
-	}()
+	queue := make(chan nodemonitor.Metrics, monitorBufferSize)
+	go a.runMonitorUploader(ctx, queue, &http.Client{Timeout: 4 * time.Second}, time.Second)
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		var previous systemSample
+		var lastWarning time.Time
+		warn := func(message string) {
+			if time.Since(lastWarning) >= time.Minute {
+				writeLog("warn", "%s", message)
+				lastWarning = time.Now()
+			}
+		}
 		for {
 			s, e := collect()
 			if e == nil {
@@ -195,6 +196,7 @@ func (a *agent) startMonitorWorkers(ctx context.Context, collect func() (systemS
 				select {
 				case queue <- m:
 				default:
+					warn("monitor buffer full; oldest queued sample discarded")
 					select {
 					case <-queue:
 					default:
@@ -204,6 +206,8 @@ func (a *agent) startMonitorWorkers(ctx context.Context, collect func() (systemS
 					default:
 					}
 				}
+			} else {
+				warn("monitor collection failed; next sample will retry")
 			}
 			select {
 			case <-ctx.Done():
@@ -212,6 +216,66 @@ func (a *agent) startMonitorWorkers(ctx context.Context, collect func() (systemS
 			}
 		}
 	}()
+}
+
+func (a *agent) runMonitorUploader(ctx context.Context, queue <-chan nodemonitor.Metrics, client *http.Client, retryDelay time.Duration) {
+	var lastWarning time.Time
+	warn := func(message string) {
+		if time.Since(lastWarning) >= time.Minute {
+			writeLog("warn", "%s", message)
+			lastWarning = time.Now()
+		}
+	}
+	for {
+		var m nodemonitor.Metrics
+		select {
+		case <-ctx.Done():
+			return
+		case next, ok := <-queue:
+			if !ok {
+				return
+			}
+			m = next
+		}
+		failed := false
+		delay := retryDelay
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			// Leave room for transport delay before the panel's one-minute age limit.
+			if time.Since(time.UnixMilli(m.SampledAtMS)) >= monitorRetention {
+				warn("monitor sample expired before delivery; sample discarded")
+				break
+			}
+			err := a.uploadMetrics(ctx, client, m)
+			if err == nil {
+				if failed {
+					writeLog("info", "monitor upload recovered; buffered samples are being delivered")
+				}
+				break
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			failed = true
+			// Never log raw transport errors: they can contain addresses or credentials.
+			warn(fmt.Sprintf("monitor upload failed (%s); sample retained for retry", err))
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			if delay < 5*retryDelay {
+				delay *= 2
+				if delay > 5*retryDelay {
+					delay = 5 * retryDelay
+				}
+			}
+		}
+	}
 }
 
 func (a *agent) monitoringSnapshot() *nodemonitor.Metrics {
@@ -227,22 +291,26 @@ func (a *agent) monitoringSnapshot() *nodemonitor.Metrics {
 func (a *agent) uploadMetrics(ctx context.Context, client *http.Client, m nodemonitor.Metrics) error {
 	body, e := json.Marshal(m)
 	if e != nil {
-		return e
+		return errors.New("invalid monitor payload")
 	}
 	req, e := http.NewRequestWithContext(ctx, http.MethodPost, a.panelAPIBaseURL()+"/agent/metrics", bytes.NewReader(body))
 	if e != nil {
-		return e
+		return errors.New("invalid panel endpoint")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	addAgentAuthHeaders(req, a.cfg.AgentID, a.cfg.AgentSecret, body)
 	res, e := client.Do(req)
 	if e != nil {
-		return e
+		var networkError net.Error
+		if errors.As(e, &networkError) && networkError.Timeout() {
+			return errors.New("transport timeout")
+		}
+		return errors.New("transport failure")
 	}
 	defer res.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("monitor upload failed")
+		return fmt.Errorf("HTTP %d", res.StatusCode)
 	}
 	return nil
 }
