@@ -50,10 +50,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: runtime
-      - run: gh release create "$RELEASE_TAG" hysteria2-plan.tar.gz --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+      - run: |
+          NOTES_PATH="docs/releases/${RELEASE_TAG}.md"
+          test -s "$NOTES_PATH" || { echo "缺少当前版本的中文发布说明"; exit 1; }
+          cat "$NOTES_PATH" > release-notes.md
+          printf '\nSHA-256：%s\n' "$(sha256sum hysteria2-plan.tar.gz | cut -d ' ' -f 1)" >> release-notes.md
+          gh release create "$RELEASE_TAG" hysteria2-plan.tar.gz --repo "$GITHUB_REPOSITORY" --verify-tag --title "Hysteria2MX ${RELEASE_TAG#v}" --notes-file release-notes.md
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}

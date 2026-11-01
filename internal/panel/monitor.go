@@ -170,7 +170,7 @@ func (a *App) handleNodeMonitor(w http.ResponseWriter, r *http.Request) {
 		timeout = boundedInt(value, 30, 86400, 120)
 	}
 	abnormal := node.AgentEnabled && agent != nil && nodeSampleStale(now.UnixMilli(), sampleMS, createdMS, time.Duration(timeout)*time.Second)
-	a.writeJSON(w, http.StatusOK, apiEnvelope{Success: true, Data: map[string]any{"abnormal": abnormal, "node_id": id, "latest": latest, "points": points, "fresh": fresh, "agent": a.agents.presentAgent(agent), "from_ms": from, "to_ms": now.UnixMilli(), "bucket_ms": bucket, "retention_days": 7}})
+	a.writeJSON(w, http.StatusOK, apiEnvelope{Success: true, Data: map[string]any{"latest_agent_version": currentAgentVersion, "abnormal": abnormal, "node_id": id, "latest": latest, "points": points, "fresh": fresh, "agent": a.agents.presentAgent(agent), "from_ms": from, "to_ms": now.UnixMilli(), "bucket_ms": bucket, "retention_days": 7}})
 }
 
 func (a *App) startMonitorCleanup(ctx context.Context) {

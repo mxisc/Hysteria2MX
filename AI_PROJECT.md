@@ -44,6 +44,8 @@ Keep this file short. Add or expand a note only when it changes future behavior 
 
 ### Release, CI, And Upgrade
 
+- Problem: commit messages and release notes use inconsistent languages or expose deployment details. Rule: write all commit subjects and descriptions in Chinese, keeping English only for technical names; follow `docs/GitHub_Release.md` for releases, list only public product changes and the runtime package SHA-256, and create a release only when explicitly requested.
+
 - Problem: CI/release automation fails from environment assumptions. Trigger: GitHub Actions runner identity/known_hosts, dependency install mode, scp/ssh flags, Alpine tools, or version injection. Rule: configure git identity and host keys explicitly, keep build dev dependencies available, validate tool-specific flags, install required CI tools, and inject `VITE_APP_VERSION` from `package.json`.
 - Problem: release and deploy flows duplicate work or publish the wrong artifact. Trigger: `main` pushes, local release scripts, tag pipelines, validation tags, or admin upgrades. Rule: let `build.sh` own version bump/commit/tag, keep CI focused on build/deploy, support skip-production validation tags, publish a stable runtime package, and make upgrades consume that package instead of source archives.
 - Problem: release hosting and updater URLs drift after migration. Trigger: changing CI or hosting providers. Rule: keep GitHub Actions, GitHub Release runtime assets, and backend update checks on the same repository; never point the updater at a source archive or an incomplete release.

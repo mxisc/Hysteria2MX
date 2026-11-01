@@ -15,5 +15,5 @@ export function createMockMonitor(nodeId: number, range: string): NodeMonitorDat
   }
   const p = points.at(-1)!
   const latest: NodeSystemMetrics = { sampled_at_ms: now, boot_id: 'mock-boot', cpu_cores: 1, cpu_percent: p.cpu_percent, memory_total: 492830720, memory_used: 218103808, memory_percent: p.memory_percent, swap_total: 268435456, swap_used: 0, swap_percent: 0, disk_total: 21474836480, disk_used: 6743098654, disk_percent: p.disk_percent, load1: p.load1, uptime_seconds: 26142, network_rx: 52741928400, network_tx: 53419512300, rx_bytes_per_second: p.rx_bytes_per_second, tx_bytes_per_second: p.tx_bytes_per_second }
-  return { node_id: nodeId, latest, points, abnormal: false, fresh: true, agent: getMockNodes().find(n => n.id === nodeId)?.agent ?? null, from_ms: from, to_ms: now, bucket_ms: bucket, retention_days: 7 }
+  return { latest_agent_version: '0.1.9', node_id: nodeId, latest, points, abnormal: false, fresh: true, agent: getMockNodes().find(n => n.id === nodeId)?.agent ?? null, from_ms: from, to_ms: now, bucket_ms: bucket, retention_days: 7 }
 }

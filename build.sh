@@ -42,6 +42,11 @@ TAG_NAME="v${NEW_VERSION}"
 echo "新版本:   v${NEW_VERSION}"
 echo ""
 
+if [ ! -s "docs/releases/${TAG_NAME}.md" ]; then
+  echo "错误: 请先按 docs/GitHub_Release.md 编写 docs/releases/${TAG_NAME}.md"
+  exit 1
+fi
+
 if git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
   echo "错误: 本地已存在标签 ${TAG_NAME}"
   exit 1

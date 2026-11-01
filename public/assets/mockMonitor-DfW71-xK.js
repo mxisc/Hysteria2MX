@@ -1,4 +1,4 @@
-import { t as getMockNodes } from "./index-C6-XCcUr.js";
+import { t as getMockNodes } from "./index-iZe4TJp_.js";
 //#region web/src/services/mockMonitor.ts
 function createMockMonitor(nodeId, range) {
 	const now = Date.now();
@@ -29,6 +29,7 @@ function createMockMonitor(nodeId, range) {
 	}
 	const p = points.at(-1);
 	return {
+		latest_agent_version: "0.1.9",
 		node_id: nodeId,
 		latest: {
 			sampled_at_ms: now,

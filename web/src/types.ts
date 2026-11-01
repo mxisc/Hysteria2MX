@@ -465,6 +465,7 @@ export interface MonitorNode {
   obfs_enabled: boolean
 }
 export interface NodeMonitorData {
+  latest_agent_version: string
   node_id: number
   latest: NodeSystemMetrics | null
   points: NodeMonitorPoint[]
