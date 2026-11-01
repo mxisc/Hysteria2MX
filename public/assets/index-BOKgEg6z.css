@@ -1179,12 +1179,12 @@ button {
 .node-inline-head > span,
 .node-inline-row > span {
   min-width: 0;
-  text-align: center;
+  text-align: left;
 }
 
 .node-inline-row > .node-inline-name,
 .node-inline-row > .node-inline-actions {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .node-inline-name,
