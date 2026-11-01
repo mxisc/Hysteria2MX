@@ -1143,7 +1143,7 @@ button {
 }
 
 .node-inline-table {
-  --node-inline-columns: minmax(130px, 0.9fr) 112px minmax(130px, 0.85fr) 96px minmax(300px, 2fr) minmax(320px, max-content);
+  --node-inline-columns: 150px 112px minmax(130px, 0.85fr) 96px minmax(300px, 2fr) minmax(320px, max-content);
   display: grid;
   grid-template-columns: var(--node-inline-columns);
   gap: 12px;
@@ -1179,12 +1179,12 @@ button {
 .node-inline-head > span,
 .node-inline-row > span {
   min-width: 0;
-  text-align: left;
+  text-align: center;
 }
 
 .node-inline-row > .node-inline-name,
 .node-inline-row > .node-inline-actions {
-  justify-content: flex-start;
+  justify-content: center;
 }
 
 .node-inline-name,
