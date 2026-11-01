@@ -155,7 +155,22 @@ func (a *App) handleNodeMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fresh := latest != nil && latest.SampledAtMS >= now.Add(-20*time.Second).UnixMilli() && a.agents.isRecordOnline(agent)
-	a.writeJSON(w, http.StatusOK, apiEnvelope{Success: true, Data: map[string]any{"node_id": id, "latest": latest, "points": points, "fresh": fresh, "agent": a.agents.presentAgent(agent), "from_ms": from, "to_ms": now.UnixMilli(), "bucket_ms": bucket, "retention_days": 7}})
+	var sampleMS, createdMS int64
+	if latest != nil {
+		sampleMS = latest.SampledAtMS
+	}
+	if agent != nil && latest == nil {
+		if err := a.db.QueryRowContext(ctx, `SELECT UNIX_TIMESTAMP(COALESCE(installed_at,created_at))*1000 FROM node_agents WHERE node_id=?`, id).Scan(&createdMS); err != nil {
+			writeError(w, http.StatusInternalServerError, "节点状态暂时无法读取")
+			return
+		}
+	}
+	timeout := 120
+	if value, ok, err := a.settings.get(ctx, settingNodeAlertTimeoutSeconds); err == nil && ok {
+		timeout = boundedInt(value, 30, 86400, 120)
+	}
+	abnormal := node.AgentEnabled && agent != nil && nodeSampleStale(now.UnixMilli(), sampleMS, createdMS, time.Duration(timeout)*time.Second)
+	a.writeJSON(w, http.StatusOK, apiEnvelope{Success: true, Data: map[string]any{"abnormal": abnormal, "node_id": id, "latest": latest, "points": points, "fresh": fresh, "agent": a.agents.presentAgent(agent), "from_ms": from, "to_ms": now.UnixMilli(), "bucket_ms": bucket, "retention_days": 7}})
 }
 
 func (a *App) startMonitorCleanup(ctx context.Context) {

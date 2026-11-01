@@ -9,6 +9,8 @@ import (
 )
 
 const (
+	settingNodeAlertEnabled        = "node_alert_enabled"
+	settingNodeAlertTimeoutSeconds = "node_alert_timeout_seconds"
 	settingSiteTitle               = "site_title"
 	settingSiteIconURL             = "site_icon_url"
 	settingPublicAPIBaseURL        = "public_api_base_url"
@@ -98,6 +100,8 @@ func (s *systemSettingsStore) ensureDefaults(ctx context.Context, cfg Config) er
 		settingBruteforceMaxAttempts:   strconv.Itoa(cfg.BruteforceMaxAttempts),
 		settingBruteforceWindowMinutes: strconv.Itoa(cfg.BruteforceWindowMinutes),
 		settingBruteforceLockMinutes:   strconv.Itoa(cfg.BruteforceLockMinutes),
+		settingNodeAlertEnabled:        strconv.FormatBool(cfg.NodeAlertEnabled),
+		settingNodeAlertTimeoutSeconds: strconv.Itoa(cfg.NodeAlertTimeoutSeconds),
 		settingSMTPEnabled:             strconv.FormatBool(cfg.SMTPEnabled),
 		settingSMTPHost:                cfg.SMTPHost,
 		settingSMTPPort:                strconv.Itoa(cfg.SMTPPort),
@@ -190,6 +194,16 @@ func (s *systemSettingsStore) applyToConfig(ctx context.Context, cfg *Config) er
 		return err
 	} else if ok {
 		cfg.BruteforceLockMinutes = parseStoredInt(value, cfg.BruteforceLockMinutes)
+	}
+	if value, ok, err := s.get(ctx, settingNodeAlertEnabled); err != nil {
+		return err
+	} else if ok {
+		cfg.NodeAlertEnabled = parseStoredBool(value, cfg.NodeAlertEnabled)
+	}
+	if value, ok, err := s.get(ctx, settingNodeAlertTimeoutSeconds); err != nil {
+		return err
+	} else if ok {
+		cfg.NodeAlertTimeoutSeconds = boundedInt(value, 30, 86400, 120)
 	}
 	if value, ok, err := s.get(ctx, settingSMTPEnabled); err != nil {
 		return err

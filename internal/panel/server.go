@@ -147,7 +147,7 @@ func (a *App) startTrafficSyncLoop() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.trafficSyncStop = cancel
-	a.backgroundWG.Add(2)
+	a.backgroundWG.Add(3)
 	a.backgroundMu.Unlock()
 
 	go func() {
@@ -155,6 +155,7 @@ func (a *App) startTrafficSyncLoop() {
 		a.runTrafficSyncLoop(ctx)
 	}()
 	go func() { defer a.backgroundWG.Done(); a.startMonitorCleanup(ctx) }()
+	go func() { defer a.backgroundWG.Done(); a.runNodeAlerts(ctx) }()
 }
 
 func (a *App) stopTrafficSyncLoop() {
@@ -908,6 +909,14 @@ func (a *App) handleUpdateNotificationSettings(writer http.ResponseWriter, reque
 		return
 	}
 
+	a.config.NodeAlertEnabled = toBool(payload["node_alert_enabled"], a.config.NodeAlertEnabled)
+	a.config.NodeAlertTimeoutSeconds = boundedInt(payload["node_alert_timeout_seconds"], 30, 86400, a.config.NodeAlertTimeoutSeconds)
+	for key, value := range map[string]string{settingNodeAlertEnabled: strconv.FormatBool(a.config.NodeAlertEnabled), settingNodeAlertTimeoutSeconds: strconv.Itoa(a.config.NodeAlertTimeoutSeconds)} {
+		if err := a.settings.set(request.Context(), key, value); err != nil {
+			writeError(writer, http.StatusInternalServerError, "通知设置保存失败")
+			return
+		}
+	}
 	a.config.SMTPEnabled = toBool(payload["smtp_enabled"], a.config.SMTPEnabled)
 	a.config.SMTPHost = host
 	a.config.SMTPPort = boundedInt(payload["smtp_port"], 1, 65535, a.config.SMTPPort)

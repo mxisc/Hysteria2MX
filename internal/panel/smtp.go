@@ -43,6 +43,7 @@ func sendSMTPMail(cfg Config, to string, subject string, body string) error {
 		return errors.New("SMTP 服务连接失败，请检查服务器地址和端口")
 	}
 	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
 
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)

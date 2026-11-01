@@ -27,7 +27,7 @@ import (
 	"time"
 )
 
-const agentVersion = "0.1.8"
+const agentVersion = "0.1.9"
 const logDir = "/var/log/mxinhy-agent"
 const agentLogPath = logDir + "/agent.log"
 const hysteriaLogPath = logDir + "/hysteria.log"
@@ -40,6 +40,7 @@ const defaultLocalAuthStatePath = "/var/lib/mxinhy-agent/local-auth.json"
 var errNodeDeleted = errors.New("node deleted by panel")
 
 type config struct {
+	WatchdogIntervalSeconds int                 `json:"watchdog_interval_seconds"`
 	CPUProtection           cpuProtectionConfig `json:"cpu_protection"`
 	NodeID                  int                 `json:"node_id"`
 	AgentID                 string              `json:"agent_id"`
@@ -154,6 +155,7 @@ type taskCompletePayload struct {
 }
 
 type agent struct {
+	serviceMu      sync.Mutex
 	monitorMu      sync.RWMutex
 	latestMetrics  *nodemonitor.Metrics
 	cpuGuardCancel context.CancelFunc
@@ -290,7 +292,10 @@ func loadConfig(path string) (config, error) {
 	if cfg.LocalAuthStatePath == "" {
 		cfg.LocalAuthStatePath = defaultLocalAuthStatePath
 	}
-	cfg.AgentConfigPath = path
+	cfg.AgentConfigPath, err = filepath.Abs(path)
+	if err != nil {
+		return config{}, err
+	}
 	if executablePath, err := os.Executable(); err == nil {
 		cfg.AgentInstallPath = executablePath
 	}
@@ -302,6 +307,7 @@ func (a *agent) run() error {
 	monitorContext, stopMonitoring := context.WithCancel(context.Background())
 	defer stopMonitoring()
 	a.startMonitoring(monitorContext)
+	go a.runServiceWatchdog(monitorContext)
 	a.setLastHeartbeatSuccess(time.Now())
 	if err := a.register(); err != nil {
 		if errors.Is(err, errNodeDeleted) {
@@ -744,6 +750,14 @@ func (a *agent) currentServiceStatus() (string, string) {
 }
 
 func (a *agent) serviceAction(action string, refreshSummary bool) commandResult {
+	a.serviceMu.Lock()
+	defer a.serviceMu.Unlock()
+	// Persist operator intent before stopping; a failed stop must not enable recovery.
+	if action == "stop" || action == "start" || action == "restart" {
+		if err := a.setServiceStopped(action == "stop"); err != nil {
+			return commandResult{ExitCode: 1, Output: "无法保存服务运行设置，请重试"}
+		}
+	}
 	if err := a.ensureServiceFileLogging(); err != nil {
 		return commandResult{ExitCode: 1, Output: err.Error()}
 	}

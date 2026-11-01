@@ -21,6 +21,8 @@ const (
 )
 
 type Config struct {
+	NodeAlertEnabled        bool
+	NodeAlertTimeoutSeconds int
 	SourcePath              string
 	BindAddr                string
 	StaticDir               string
@@ -95,6 +97,8 @@ func LoadConfig(configPath string) (Config, error) {
 		BruteforceMaxAttempts:   5,
 		BruteforceWindowMinutes: 15,
 		BruteforceLockMinutes:   15,
+		NodeAlertEnabled:        true,
+		NodeAlertTimeoutSeconds: 120,
 		SMTPEnabled:             false,
 		SMTPHost:                "",
 		SMTPPort:                587,
@@ -149,16 +153,18 @@ func (c Config) SystemSettings() map[string]any {
 
 func (c Config) NotificationSettings() map[string]any {
 	return map[string]any{
-		"smtp_enabled":             c.SMTPEnabled,
-		"smtp_host":                c.SMTPHost,
-		"smtp_port":                c.SMTPPort,
-		"smtp_encryption":          c.SMTPEncryption,
-		"smtp_username":            c.SMTPUsername,
-		"smtp_password":            "",
-		"smtp_password_configured": c.SMTPPassword != "",
-		"smtp_from_email":          c.SMTPFromEmail,
-		"smtp_from_name":           c.SMTPFromName,
-		"smtp_notify_email":        c.SMTPNotifyEmail,
+		"node_alert_enabled":         c.NodeAlertEnabled,
+		"node_alert_timeout_seconds": c.NodeAlertTimeoutSeconds,
+		"smtp_enabled":               c.SMTPEnabled,
+		"smtp_host":                  c.SMTPHost,
+		"smtp_port":                  c.SMTPPort,
+		"smtp_encryption":            c.SMTPEncryption,
+		"smtp_username":              c.SMTPUsername,
+		"smtp_password":              "",
+		"smtp_password_configured":   c.SMTPPassword != "",
+		"smtp_from_email":            c.SMTPFromEmail,
+		"smtp_from_name":             c.SMTPFromName,
+		"smtp_notify_email":          c.SMTPNotifyEmail,
 	}
 }
 

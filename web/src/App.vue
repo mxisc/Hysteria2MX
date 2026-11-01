@@ -618,6 +618,8 @@ const notificationSettingsForm = ref<NotificationSettings>({
   smtp_password_configured: false,
   smtp_from_email: '',
   smtp_from_name: 'Hysteria2 Panel',
+  node_alert_enabled: true,
+  node_alert_timeout_seconds: 120,
   smtp_notify_email: '',
 })
 const monitorNodeId = ref<number | undefined>(undefined)
@@ -3289,6 +3291,15 @@ async function handleSendTestNotification() {
                 <label class="config-field">
                   <span class="meta-label">接收邮箱</span>
                   <input v-model="notificationSettingsForm.smtp_notify_email" class="background-select" type="email" placeholder="admin@example.com" />
+                </label>
+                <label class="config-field">
+                  <span class="meta-label">节点采样异常通知</span>
+                  <span><input v-model="notificationSettingsForm.node_alert_enabled" type="checkbox" /> 启用（需开启 SMTP）</span>
+                </label>
+                <label class="config-field">
+                  <span class="meta-label">连续无采样告警时间（秒）</span>
+                  <input v-model.number="notificationSettingsForm.node_alert_timeout_seconds" class="background-select" type="number" min="30" max="86400" />
+                  <small>同次异常仅通知一次，恢复采样后重新计次。</small>
                 </label>
               </div>
             </article>

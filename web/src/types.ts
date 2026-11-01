@@ -420,6 +420,8 @@ export interface NotificationSettings {
   smtp_password_configured: boolean
   smtp_from_email: string
   smtp_from_name: string
+  node_alert_enabled: boolean
+  node_alert_timeout_seconds: number
   smtp_notify_email: string
 }
 
@@ -466,6 +468,7 @@ export interface NodeMonitorData {
   node_id: number
   latest: NodeSystemMetrics | null
   points: NodeMonitorPoint[]
+  abnormal: boolean
   fresh: boolean
   agent: NodeAgentInfo | null
   from_ms: number

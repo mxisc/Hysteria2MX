@@ -26,7 +26,7 @@ const node = computed(() => nodes.value.find(n => n.id === nodeId.value))
 const latest = computed(() => data.value?.latest)
 const fresh = computed(() => !error.value && data.value?.fresh && latest.value && now.value - latest.value.sampled_at_ms < 20000)
 const ranges = [{ id: '1h', label: '近 1 小时' }, { id: '6h', label: '近 6 小时' }, { id: '24h', label: '近 24 小时' }, { id: '7d', label: '近 7 天' }]
-const status = computed(() => !node.value?.agent_enabled ? '未启用 Agent' : !latest.value ? '等待首次上报' : fresh.value ? '实时监控中' : '数据已过期')
+const status = computed(() => !node.value?.agent_enabled ? '未启用 Agent' : data.value?.abnormal ? '节点异常 · 采样中断' : !latest.value ? '等待首次上报' : fresh.value ? '实时监控中' : '数据已过期')
 let timer: ReturnType<typeof setInterval> | undefined
 let observer: ResizeObserver | undefined
 let controller: AbortController | undefined

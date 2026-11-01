@@ -1,4 +1,4 @@
-import { t as getMockNodes } from "./index--zPhBsci.js";
+import { t as getMockNodes } from "./index-C6-XCcUr.js";
 //#region web/src/services/mockMonitor.ts
 function createMockMonitor(nodeId, range) {
 	const now = Date.now();
@@ -52,6 +52,7 @@ function createMockMonitor(nodeId, range) {
 			tx_bytes_per_second: p.tx_bytes_per_second
 		},
 		points,
+		abnormal: false,
 		fresh: true,
 		agent: getMockNodes().find((n) => n.id === nodeId)?.agent ?? null,
 		from_ms: from,
