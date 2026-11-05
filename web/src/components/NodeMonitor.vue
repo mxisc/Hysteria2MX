@@ -16,6 +16,7 @@ const range = ref('1h')
 const data = ref<NodeMonitorData | null>(null)
 const error = ref('')
 const loading = ref(false)
+const nodesLoading = ref(true)
 const now = ref(Date.now())
 const cpuEl = ref<HTMLElement>()
 const memoryEl = ref<HTMLElement>()
@@ -26,7 +27,7 @@ const node = computed(() => nodes.value.find(n => n.id === nodeId.value))
 const latest = computed(() => data.value?.latest)
 const fresh = computed(() => !error.value && data.value?.fresh && latest.value && now.value - latest.value.sampled_at_ms < 20000)
 const ranges = [{ id: '1h', label: '近 1 小时' }, { id: '6h', label: '近 6 小时' }, { id: '24h', label: '近 24 小时' }, { id: '7d', label: '近 7 天' }]
-const status = computed(() => !node.value?.agent_enabled ? '未启用 Agent' : data.value?.abnormal ? '节点异常 · 采样中断' : !latest.value ? '等待首次上报' : fresh.value ? '实时监控中' : '数据已过期')
+const status = computed(() => nodesLoading.value ? '加载中…' : !node.value ? '未选择节点' : !node.value.agent_enabled ? '未启用 Agent' : data.value?.abnormal ? '节点异常 · 采样中断' : !latest.value ? '等待首次上报' : fresh.value ? '实时监控中' : '数据已过期')
 let timer: ReturnType<typeof setInterval> | undefined
 let observer: ResizeObserver | undefined
 let controller: AbortController | undefined
@@ -44,8 +45,8 @@ function bytes(value?: number) {
 function percent(value?: number | null) { return value == null ? '—' : `${value.toFixed(1)}%` }
 function speed(value?: number | null) { return value == null ? '—' : `${(value * 8 / 1e6).toFixed(1)} Mbps` }
 function uptime(value?: number) {
-  if (value == null) return '—'
-  return `${Math.floor(value / 86400)} 天 ${Math.floor(value / 3600) % 24} 小时`
+  if (value == null || !Number.isFinite(value) || value < 0) return '—'
+  return `${Math.floor(value / 86400)}d ${String(Math.floor(value / 3600) % 24).padStart(2, '0')}h ${String(Math.floor(value / 60) % 60).padStart(2, '0')}m`
 }
 
 async function refresh(reset = false) {
@@ -120,6 +121,7 @@ function visible() { if (!document.hidden) { now.value = Date.now(); void refres
 watch([nodeId, range], () => { void refresh(true) })
 onMounted(async () => {
   observer = new ResizeObserver(() => charts.forEach(c => c.resize()))
+  void render()
   document.addEventListener('visibilitychange', visible)
   timer = setInterval(() => { now.value = Date.now(); void refresh() }, 5000)
   nodesController = new AbortController()
@@ -131,7 +133,7 @@ onMounted(async () => {
     nodeId.value = list.some(n => n.id === props.initialNodeId) ? props.initialNodeId! : list[0]?.id ?? null
     await render()
   } catch { if (!disposed) error.value = '节点列表暂时无法读取，请重新进入监控页面。' }
-  finally { clearTimeout(timeout) }
+  finally { clearTimeout(timeout); nodesLoading.value = false }
 })
 onBeforeUnmount(() => {
   disposed = true; revision++; controller?.abort(); nodesController?.abort()
@@ -144,13 +146,12 @@ onBeforeUnmount(() => {
   <section class="content-page monitor-page">
     <article class="card monitor-toolbar">
       <div><p class="eyebrow">NODE MONITOR</p><h3>节点监控</h3><p class="monitor-subtitle">每 5 秒采样 · 系统资源与网卡流量 · 保留 7 天</p></div>
-      <div class="monitor-controls"><label>监控节点<select aria-label="监控节点" v-model="nodeId" :disabled="!nodes.length"><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.name }} · {{ n.host }}</option></select></label><div class="monitor-ranges" aria-label="监控时间范围"><button v-for="r in ranges" :key="r.id" :class="{ active: range === r.id }" @click="range = r.id">{{ r.label }}</button></div></div>
+      <div class="monitor-controls"><label>监控节点<select aria-label="监控节点" v-model="nodeId" :disabled="nodesLoading || !nodes.length"><option v-if="nodesLoading" :value="null">加载中…</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.name }} · {{ n.host }}</option></select></label><div class="monitor-ranges" aria-label="监控时间范围"><button v-for="r in ranges" :key="r.id" :class="{ active: range === r.id }" @click="range = r.id">{{ r.label }}</button></div></div>
     </article>
-    <div class="monitor-live-row"><span class="monitor-live" :class="{ live: fresh }"><i />{{ status }}</span><span v-if="latest">最后采样 {{ new Date(latest.sampled_at_ms).toLocaleTimeString('zh-CN') }}{{ fresh ? '' : ' · 下方为最后一次记录' }}</span><span v-else>{{ loading ? '正在读取监控记录…' : '新监控从部署后开始记录' }}</span></div>
+    <div class="monitor-live-row"><span class="monitor-live" :class="{ live: fresh }"><i />{{ status }}</span><span v-if="latest">最后采样 {{ new Date(latest.sampled_at_ms).toLocaleTimeString('zh-CN') }}{{ fresh ? '' : ' · 下方为最后一次记录' }}</span><span v-else>{{ nodesLoading || loading ? '正在读取监控记录…' : '新监控从部署后开始记录' }}</span></div>
     <p v-if="error" class="monitor-error" role="status">{{ error }}</p>
-    <article v-if="!nodes.length && !error" class="card monitor-empty">暂无节点，请先添加节点。</article>
-    <template v-if="node">
-      <article class="card monitor-details"><span>运行时间 <b>{{ uptime(latest?.uptime_seconds) }}</b></span><span>1 分钟负载 <b>{{ latest?.load1.toFixed(2) ?? '—' }}</b></span><span>Swap <b>{{ bytes(latest?.swap_used) }} / {{ bytes(latest?.swap_total) }}</b></span><span>流量混淆 <b>{{ node.obfs_enabled ? '开启' : '关闭' }}</b></span></article>
+    <article v-if="!nodesLoading && !nodes.length && !error" class="card monitor-empty">暂无节点，请先添加节点。</article>
+      <article class="card monitor-details"><span>1 分钟负载 <b>{{ latest?.load1.toFixed(2) ?? '—' }}</b></span><span>Swap <b>{{ bytes(latest?.swap_used) }} / {{ bytes(latest?.swap_total) }}</b></span><span>流量混淆 <b>{{ !node ? '—' : node.obfs_enabled ? '开启' : '关闭' }}</b></span></article>
       <div class="monitor-summary" :class="{ stale: !fresh }">
         <article class="card monitor-stat"><span>整机 CPU</span><strong>{{ percent(latest?.cpu_percent) }}</strong><small>{{ latest?.cpu_cores ?? '—' }} vCPU · 全核平均利用率</small><div class="monitor-meter"><i :style="{ width: `${latest?.cpu_percent ?? 0}%`, background: '#60a5fa' }" /></div></article>
         <article class="card monitor-stat"><span>内存使用</span><strong>{{ percent(latest?.memory_percent) }}</strong><small>{{ bytes(latest?.memory_used) }} / {{ bytes(latest?.memory_total) }}</small><div class="monitor-meter"><i :style="{ width: `${latest?.memory_percent ?? 0}%`, background: '#34d399' }" /></div></article>
@@ -158,13 +159,12 @@ onBeforeUnmount(() => {
         <article class="card monitor-stat"><span>磁盘使用</span><strong>{{ percent(latest?.disk_percent) }}</strong><small>{{ bytes(latest?.disk_used) }} / {{ bytes(latest?.disk_total) }}</small><div class="monitor-meter"><i :style="{ width: `${latest?.disk_percent ?? 0}%`, background: '#fbbf24' }" /></div></article>
       </div>
       <div class="monitor-charts">
-        <article class="card monitor-chart"><div class="monitor-chart-heading"><h4>CPU 使用率</h4><span>{{ data && data.bucket_ms > 5000 ? '平均值与区间峰值' : '全核平均 · %' }}</span></div><div ref="cpuEl" class="monitor-canvas" /><div v-if="!data?.points.length" class="monitor-chart-empty">{{ loading ? '加载中…' : '等待监控数据' }}</div></article>
-        <article class="card monitor-chart"><div class="monitor-chart-heading"><h4>内存与 Swap</h4><span>使用率 · %</span></div><div ref="memoryEl" class="monitor-canvas" /><div v-if="!data?.points.length" class="monitor-chart-empty">{{ loading ? '加载中…' : '等待监控数据' }}</div></article>
-        <article class="card monitor-chart"><div class="monitor-chart-heading"><h4>网络收发速率</h4><span>系统网卡 · Mbps</span></div><div ref="networkEl" class="monitor-canvas" /><div v-if="!data?.points.length" class="monitor-chart-empty">{{ loading ? '加载中…' : '等待监控数据' }}</div></article>
-        <article class="card monitor-chart"><div class="monitor-chart-heading"><h4>磁盘使用率</h4><span>根分区 · %</span></div><div ref="diskEl" class="monitor-canvas" /><div v-if="!data?.points.length" class="monitor-chart-empty">{{ loading ? '加载中…' : '等待监控数据' }}</div></article>
+        <article class="card monitor-chart"><div class="monitor-chart-heading"><h4>CPU 使用率</h4><span>{{ data && data.bucket_ms > 5000 ? '平均值与区间峰值' : '全核平均 · %' }}</span></div><div ref="cpuEl" class="monitor-canvas" /><div v-if="!data?.points.length" class="monitor-chart-empty">{{ nodesLoading || loading ? '加载中…' : '等待监控数据' }}</div></article>
+        <article class="card monitor-chart"><div class="monitor-chart-heading"><h4>内存与 Swap</h4><span>使用率 · %</span></div><div ref="memoryEl" class="monitor-canvas" /><div v-if="!data?.points.length" class="monitor-chart-empty">{{ nodesLoading || loading ? '加载中…' : '等待监控数据' }}</div></article>
+        <article class="card monitor-chart"><div class="monitor-chart-heading"><h4>网络收发速率</h4><span>系统网卡 · Mbps</span></div><div ref="networkEl" class="monitor-canvas" /><div v-if="!data?.points.length" class="monitor-chart-empty">{{ nodesLoading || loading ? '加载中…' : '等待监控数据' }}</div></article>
+        <article class="card monitor-chart"><div class="monitor-chart-heading"><h4>磁盘使用率</h4><span>根分区 · %</span></div><div ref="diskEl" class="monitor-canvas" /><div v-if="!data?.points.length" class="monitor-chart-empty">{{ nodesLoading || loading ? '加载中…' : '等待监控数据' }}</div></article>
       </div>
-      <article class="card monitor-counters"><div><span>本次启动累计接收</span><strong>{{ bytes(latest?.network_rx) }}</strong></div><div><span>本次启动累计发送</span><strong>{{ bytes(latest?.network_tx) }}</strong></div><div><span>Agent 当前版本</span><strong>{{ data?.agent ? (data.agent.version || '未上报') : '未部署' }}</strong></div><div><span>Agent 最新版本</span><strong>{{ data?.latest_agent_version || '—' }}</strong></div><p>累计计数在重启后重新开始；图表保留历史采样。内存使用量扣除可用内存，离线或漏采期间显示空档。</p></article>
-    </template>
+      <article class="card monitor-counters"><div><span>运行时间</span><strong>{{ uptime(latest?.uptime_seconds) }}</strong></div><div><span>本次启动累计接收</span><strong>{{ bytes(latest?.network_rx) }}</strong></div><div><span>本次启动累计发送</span><strong>{{ bytes(latest?.network_tx) }}</strong></div><div><span>Agent 当前版本</span><strong>{{ !data ? '—' : data.agent ? (data.agent.version || '未上报') : '未部署' }}</strong></div><div><span>Agent 最新版本</span><strong>{{ data?.latest_agent_version || '—' }}</strong></div><p>累计计数在重启后重新开始；图表保留历史采样。内存使用量扣除可用内存，离线或漏采期间显示空档。</p></article>
   </section>
 </template>
 

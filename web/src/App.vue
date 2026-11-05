@@ -504,6 +504,7 @@ const logsLoaded = ref(false)
 const logsText = ref('')
 const nodes = ref<HysteriaNodeConfig[]>([])
 const nodesLoaded = ref(false)
+const listLoadErrors = ref<Record<string, boolean>>({})
 const nodePageSize = ref<(typeof listPageSizeOptions)[number]>(10)
 const nodePage = ref(1)
 const nodePagination = ref<PaginationMeta>(createPaginationMeta(nodePageSize.value))
@@ -1434,7 +1435,11 @@ async function loadLogs() {
 }
 
 async function loadNodes(page = nodePage.value, syncSelectedNode = true) {
-  const result = await fetchNodes(page, nodePageSize.value)
+  listLoadErrors.value.nodes = false
+  const result = await fetchNodes(page, nodePageSize.value).catch(error => {
+    listLoadErrors.value.nodes = true
+    throw error
+  })
   nodes.value = result.items
   nodePagination.value = result.pagination
   nodePage.value = result.pagination.page
@@ -1452,7 +1457,11 @@ async function loadNodes(page = nodePage.value, syncSelectedNode = true) {
 }
 
 async function loadUsers(page = userPage.value) {
-  const result = await fetchLogicalUsers(page, userPageSize.value, userFilterKeyword.value, userViewFilter.value)
+  listLoadErrors.value.users = false
+  const result = await fetchLogicalUsers(page, userPageSize.value, userFilterKeyword.value, userViewFilter.value).catch(error => {
+    listLoadErrors.value.users = true
+    throw error
+  })
   logicalUsers.value = result.items
   users.value = result.items.flatMap((item) => item.details)
   userPagination.value = result.pagination
@@ -1462,7 +1471,11 @@ async function loadUsers(page = userPage.value) {
 }
 
 async function loadAuditLogs(page = auditLogPage.value) {
-  const result = await fetchAuditLogs(selectedLogNodeId.value, page, auditLogPageSize.value)
+  listLoadErrors.value.audit = false
+  const result = await fetchAuditLogs(selectedLogNodeId.value, page, auditLogPageSize.value).catch(error => {
+    listLoadErrors.value.audit = true
+    throw error
+  })
   auditLogs.value = result.items
   auditLogPagination.value = result.pagination
   auditLogPage.value = result.pagination.page
@@ -1471,7 +1484,11 @@ async function loadAuditLogs(page = auditLogPage.value) {
 }
 
 async function loadAdmins(page = adminPage.value) {
-  const result = await fetchAdmins(page, adminPageSize.value)
+  listLoadErrors.value.admins = false
+  const result = await fetchAdmins(page, adminPageSize.value).catch(error => {
+    listLoadErrors.value.admins = true
+    throw error
+  })
   admins.value = result.items
   adminPagination.value = result.pagination
   adminPage.value = result.pagination.page
@@ -2820,7 +2837,7 @@ async function handleSendTestNotification() {
             </div>
           </div>
           <div v-else class="empty-card">
-            <p>暂无数据</p>
+            <p>{{ trafficHistoryLoaded ? '暂无数据' : '加载中…' }}</p>
           </div>
         </article>
 
@@ -2929,7 +2946,7 @@ async function handleSendTestNotification() {
             </div>
           </div>
           <div v-else class="empty-card">
-            <p>暂无节点</p>
+            <p>{{ listLoadErrors.nodes ? '加载失败，请重试' : nodesLoaded ? '暂无节点' : '加载中…' }}</p>
           </div>
         </article>
       </section>
@@ -3041,7 +3058,7 @@ async function handleSendTestNotification() {
               </div>
             </div>
             <div v-else class="empty-card">
-              <p>暂无用户</p>
+              <p>{{ listLoadErrors.users ? '加载失败，请重试' : usersLoaded ? '暂无用户' : '加载中…' }}</p>
             </div>
           </article>
         </section>
@@ -3111,7 +3128,7 @@ async function handleSendTestNotification() {
               </div>
             </div>
             <pre ref="logsOutputRef" class="terminal-output large-terminal">{{
-              hasPermission('logs.view') ? (logsText || '暂无日志输出') : '当前角色无权查看日志'
+              hasPermission('logs.view') ? (logsText || (logsLoaded ? '暂无日志输出' : '加载中…')) : '当前角色无权查看日志'
             }}</pre>
           </article>
 
@@ -3149,7 +3166,7 @@ async function handleSendTestNotification() {
               </div>
             </template>
             <div v-else class="empty-card">
-              <p>{{ hasPermission('audit.view') ? '暂无记录' : '无权查看' }}</p>
+              <p>{{ hasPermission('audit.view') ? (listLoadErrors.audit ? '加载失败，请重试' : auditLogsLoaded ? '暂无记录' : '加载中…') : '无权查看' }}</p>
             </div>
           </article>
           </section>
@@ -3207,7 +3224,7 @@ async function handleSendTestNotification() {
               </div>
             </div>
             <div v-else class="empty-card">
-              <p>暂无管理员</p>
+              <p>{{ listLoadErrors.admins ? '加载失败，请重试' : adminsLoaded ? '暂无管理员' : '加载中…' }}</p>
             </div>
           </article>
         </section>

@@ -1,4 +1,4 @@
-import { t as getMockNodes } from "./index-BYPWoFNB.js";
+import { t as getMockNodes } from "./index-0tTEK4Oa.js";
 //#region web/src/services/mockMonitor.ts
 function createMockMonitor(nodeId, range) {
 	const now = Date.now();
