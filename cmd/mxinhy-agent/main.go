@@ -155,6 +155,7 @@ type taskCompletePayload struct {
 }
 
 type agent struct {
+	diagnostics    diagnosticState
 	serviceMu      sync.Mutex
 	monitorMu      sync.RWMutex
 	latestMetrics  *nodemonitor.Metrics
@@ -1430,13 +1431,19 @@ func (a *agent) postJSON(path string, payload interface{}, target interface{}) e
 	req.Header.Set("Content-Type", "application/json")
 	addAgentAuthHeaders(req, a.cfg.AgentID, a.cfg.AgentSecret, body)
 
+	finishDiagnostic := func(int, error) {}
+	if path == "/agent/heartbeat" {
+		finishDiagnostic = a.diagnoseRequest(req, "heartbeat")
+	}
 	resp, err := a.client.Do(req)
 	if err != nil {
+		finishDiagnostic(0, err)
 		return err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
+	finishDiagnostic(resp.StatusCode, err)
 	if err != nil {
 		return err
 	}

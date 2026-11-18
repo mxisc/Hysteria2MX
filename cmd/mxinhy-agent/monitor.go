@@ -299,7 +299,13 @@ func (a *agent) uploadMetrics(ctx context.Context, client *http.Client, m nodemo
 	}
 	req.Header.Set("Content-Type", "application/json")
 	addAgentAuthHeaders(req, a.cfg.AgentID, a.cfg.AgentSecret, body)
+	finishDiagnostic := a.diagnoseRequest(req, "metrics")
 	res, e := client.Do(req)
+	status := 0
+	if res != nil {
+		status = res.StatusCode
+	}
+	finishDiagnostic(status, e)
 	if e != nil {
 		var networkError net.Error
 		if errors.As(e, &networkError) && networkError.Timeout() {
