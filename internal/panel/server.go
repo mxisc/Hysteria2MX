@@ -845,6 +845,7 @@ func (a *App) handleUpdateSystemSettings(writer http.ResponseWriter, request *ht
 }
 
 func (a *App) handleVersionCheck(writer http.ResponseWriter, request *http.Request) {
+	writer.Header().Set("Cache-Control", "private, no-store")
 	if _, ok := requireUser(request.Context(), a.auth, writer, request); !ok {
 		return
 	}

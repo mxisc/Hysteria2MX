@@ -9,13 +9,6 @@ Installation policy:
 - If a required installation cannot reasonably be done with `brew`, ask the user for permission before using any other method, including curl/bash install scripts, global npm/pip installs, downloaded installers, source builds, alternative package managers, or manual installation.
 - For project-local dependencies, follow the project’s existing package manager, lockfiles, and dependency conventions. Do not perform global installs unless the user explicitly approves.
 
-Project memory policy:
-- Treat `AI_PROJECT.md` as a compact reusable rulebook, not a task log.
-- Before writing to it, first decide whether the lesson is likely to change future work across multiple tasks. If it is a one-off bug, ordinary implementation detail, temporary workaround, obvious cleanup, or already covered by an existing broader rule, do not add a new note.
-- When a note is needed, prefer updating or merging into an existing rule instead of appending a new item. Keep the wording short and general enough to be reused.
-- Each note should name the recurring problem, the trigger or cause when useful, and the prevention rule. Avoid long incident narratives, command transcripts, diary-style progress logs, vague observations, and duplicates.
-- At most one `AI_PROJECT.md` update should normally be needed for a task. If several lessons appear, consolidate them into one broader rule or leave low-value details out.
-
 Cleanup policy:
 - Before finishing each task, review the changes and decide whether the task left behind unused, redundant, temporary, or dead code.
 - Remove unnecessary code, files, imports, dependencies, debug logs, temporary comments, one-off scripts, obsolete branches, and test scaffolding that is no longer needed.
@@ -23,7 +16,7 @@ Cleanup policy:
 - If you are unsure whether something is safe to remove, do not delete it blindly; mention the uncertainty in the final response.
 
 Completion report:
-- In the final response, briefly state what was completed, whether `AI_PROJECT.md` was updated, whether cleanup was performed, and whether validation or tests were run.
+- In the final response, briefly state what was completed, whether cleanup was performed, and whether validation or tests were run.
 
 Database change policy:
 - When making SQL, schema, data migration, index, view, stored procedure, seed data, or configuration-table changes, provide a corresponding change document.

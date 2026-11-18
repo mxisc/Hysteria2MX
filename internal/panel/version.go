@@ -22,6 +22,9 @@ const runtimePackageFileName = "hysteria2-plan.tar.gz"
 const defaultPanelServiceName = "mxinhy-panel"
 const defaultUpgradeKeepReleases = 5
 
+// Release builds inject the same package version used by the frontend.
+var buildVersion string
+
 type installLayout struct {
 	mode              string
 	rootDir           string
@@ -69,7 +72,7 @@ func checkLatestVersion(rootDir string) (map[string]any, error) {
 		for _, asset := range release.Assets {
 			if asset.Name == runtimePackageFileName {
 				latestTag = release.Tag
-				latestVersion = strings.TrimPrefix(latestTag, "v")
+				latestVersion = normalizeAppVersion(latestTag)
 				break
 			}
 		}
@@ -98,6 +101,9 @@ func upgradeLatestVersion(rootDir string) (map[string]any, error) {
 	latest, _ := check["latest"].(string)
 	if latest == "" {
 		return nil, errors.New("无法获取最新版本信息")
+	}
+	if current == "unknown" {
+		return nil, errors.New("无法确认当前版本，请稍后重试")
 	}
 	if compareVersion(latest, current) <= 0 {
 		return nil, errors.New("当前已是最新版本")
@@ -140,6 +146,9 @@ func upgradeLatestVersion(rootDir string) (map[string]any, error) {
 }
 
 func currentAppVersion(rootDir string) string {
+	if version := normalizeAppVersion(buildVersion); version != "" {
+		return version
+	}
 	content, err := os.ReadFile(filepath.Join(rootDir, "package.json"))
 	if err != nil {
 		return "unknown"
@@ -148,11 +157,15 @@ func currentAppVersion(rootDir string) string {
 	if err := json.Unmarshal(content, &pkg); err != nil {
 		return "unknown"
 	}
-	version := toString(pkg["version"])
+	version := normalizeAppVersion(toString(pkg["version"]))
 	if version == "" {
 		return "unknown"
 	}
 	return version
+}
+
+func normalizeAppVersion(version string) string {
+	return strings.TrimPrefix(strings.TrimSpace(version), "v")
 }
 
 func runtimePackageURL(tag string) string {
@@ -400,7 +413,7 @@ func runCommandChecked(name string, args ...string) error {
 }
 
 func compareVersion(left string, right string) int {
-	normalize := func(v string) []string { return strings.Split(strings.TrimSpace(v), ".") }
+	normalize := func(v string) []string { return strings.Split(normalizeAppVersion(v), ".") }
 	l := normalize(left)
 	r := normalize(right)
 	maxLen := len(l)

@@ -5,6 +5,7 @@ import NodeRadioGroup from './components/NodeRadioGroup.vue'
 import ToggleSwitch from './components/ToggleSwitch.vue'
 import NodeObfsSettings from './components/NodeObfsSettings.vue'
 import CPUProtectionDialog from './components/CPUProtectionDialog.vue'
+import VersionUpdateDialog from './components/VersionUpdateDialog.vue'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { init, use } from 'echarts/core'
@@ -484,11 +485,15 @@ function ensureSectionAccess() {
 const panel = ref<HysteriaPanelState>(createEmptyPanelState())
 const currentSection = ref<SectionId>('overview')
 const session = ref<AuthSession | null>(null)
-const appVersion = import.meta.env.VITE_APP_VERSION || 'dev'
-const versionUpdateAvailable = ref(false)
+const appVersion = ref(import.meta.env.VITE_APP_VERSION || 'dev')
 const latestVersion = ref<string | null>(null)
+const versionUpdateAvailable = computed(() => latestVersion.value !== null)
 const versionChecking = ref(false)
 const versionUpgrading = ref(false)
+const upgradeTargetVersion = ref<string | null>(null)
+const versionUpgradeComplete = ref(false)
+const versionUpgradeError = ref('')
+let versionReloadTimer: ReturnType<typeof setTimeout> | undefined
 const authChecked = ref(false)
 const setupStatus = ref<SetupStatus | null>(null)
 const setupSubmitting = ref(false)
@@ -1582,43 +1587,58 @@ async function bootstrap() {
   void checkForUpdates()
 }
 
-async function checkForUpdates(): Promise<void> {
+async function checkForUpdates(notify = false): Promise<void> {
+  if (!session.value || versionChecking.value || versionUpgrading.value) return
   try {
     versionChecking.value = true
     const result = await checkVersion()
-    if (result.hasUpdate) {
-      versionUpdateAvailable.value = true
-      latestVersion.value = result.latest
+    if (!session.value) return
+    appVersion.value = result.current
+    latestVersion.value = result.hasUpdate ? result.latest : null
+    if (notify && !result.hasUpdate) {
+      showToast(result.current === 'unknown' ? '暂时无法确认当前版本，请稍后重试' : result.latest ? '当前已是最新版本' : '暂时无法获取最新版本，请稍后重试', 'info')
     }
   } catch {
-    // 静默失败，不影响主流程
+    latestVersion.value = null
+    if (notify) showToast('检查更新失败，请稍后重试', 'error')
   } finally {
     versionChecking.value = false
   }
 }
 
-function handleVersionClick(): void {
-  if (versionUpdateAvailable.value) {
-    if (confirm(`发现新版本 v${latestVersion.value}，是否立即升级？\n\n升级过程中会自动备份当前配置，升级完成后页面将自动刷新。`)) {
-      void performUpgrade()
-    }
+async function handleVersionClick(): Promise<void> {
+  if (versionChecking.value || versionUpgrading.value) return
+  if (!latestVersion.value) {
+    await checkForUpdates(true)
+  }
+  if (!latestVersion.value) return
+  if (hasPermission('system.upgrade')) {
+    versionUpgradeError.value = ''
+    versionUpgradeComplete.value = false
+    upgradeTargetVersion.value = latestVersion.value
   } else {
-    void checkForUpdates()
+    showToast(`发现新版本 v${latestVersion.value}，请联系管理员升级`, 'info')
   }
 }
 
+function closeVersionDialog(): void {
+  if (!versionUpgrading.value) upgradeTargetVersion.value = null
+}
+
 async function performUpgrade(): Promise<void> {
+  if (versionUpgrading.value || !upgradeTargetVersion.value || !hasPermission('system.upgrade')) return
   try {
     versionUpgrading.value = true
-    showToast('正在下载更新包...', 'info')
+    versionUpgradeError.value = ''
     const result = await upgradeVersion()
-    showToast(`升级成功！${result.from} → ${result.to}，备份目录：${result.backup}`, 'success')
-    setTimeout(() => {
+    upgradeTargetVersion.value = result.to
+    versionUpgradeComplete.value = true
+    latestVersion.value = null
+    versionReloadTimer = setTimeout(() => {
       window.location.reload()
     }, 2000)
-  } catch (error) {
-    showToast(getErrorMessage(error), 'error')
-  } finally {
+  } catch {
+    versionUpgradeError.value = '升级未完成，请稍后重试'
     versionUpgrading.value = false
   }
 }
@@ -1628,6 +1648,7 @@ onMounted(() => {
   void bootstrap()
 })
 onBeforeUnmount(() => {
+  if (versionReloadTimer) clearTimeout(versionReloadTimer)
   clearToast()
   stopNodeStatusSyncTimer()
   stopAuditLogAutoRefreshTimer()
@@ -1758,6 +1779,7 @@ async function handleLogin() {
       applyPublicAppSettings(systemSettingsForm.value)
     }
     await setSection(currentSection.value)
+    void checkForUpdates()
   } catch (error) {
     loginError.value = getErrorMessage(error)
   } finally {
@@ -1793,6 +1815,8 @@ async function handleLogout() {
   stopUserTrafficStatsTimer()
   await logout()
   session.value = null
+  latestVersion.value = null
+  upgradeTargetVersion.value = null
   panel.value = createEmptyPanelState()
   nodeForm.value = createEmptyNodeForm()
   userForm.value = createEmptyUserForm()
@@ -3928,6 +3952,17 @@ async function handleSendTestNotification() {
         </div>
       </section>
     </div>
+
+    <VersionUpdateDialog
+      v-if="upgradeTargetVersion"
+      :current-version="appVersion"
+      :latest-version="upgradeTargetVersion"
+      :upgrading="versionUpgrading"
+      :complete="versionUpgradeComplete"
+      :error="versionUpgradeError"
+      @close="closeVersionDialog"
+      @upgrade="performUpgrade"
+    />
 
     <div v-if="showUserDeleteModal" class="modal-overlay">
       <section class="modal-card confirm-modal-card">
